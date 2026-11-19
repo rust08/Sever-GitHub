@@ -39,6 +39,16 @@
         </section>
       </div>
       
+      <details class="panel page" id="order-panel">
+        <summary><strong>Учебный наряд · основания и приёмка</strong></summary>
+        <p>Выберите участок на карте и нажмите «Проверить учебный наряд». Досье и документы в примере вымышлены. Пробный маршрут рассчитывается отдельно от смены. Журнал сохраняется в этом браузере.</p>
+        <p id="order-road"></p>
+        <label>Досье <select id="order-case"><option value="unknown">Документы отсутствуют</option><option value="example">Учебный договор на выбранный участок</option><option value="outside">Участок вне учебного договора</option></select></label>
+        <label>Операция <select id="order-operation"></select></label>
+        <label>Направление <select id="order-direction"></select></label>
+        <label><input type="checkbox" id="order-event"> Смоделировать подтверждённое окончание снегопада в момент начала смены</label>
+        <div id="order-output" aria-live="polite"></div>
+      </details>
       <section class="panel detail-panel" id="shift-details">
         <div class="tabs" role="group" aria-label="Раздел плана"><button class="active" aria-pressed="true" data-page="routes">Маршрутные листы</button><button aria-pressed="false" data-page="tasks">Дороги и приоритеты</button><button aria-pressed="false" data-page="unassigned">Без назначения</button></div>
         <div id="routes" class="page"></div><div id="tasks" class="page" hidden></div><div id="unassigned" class="page" hidden></div>

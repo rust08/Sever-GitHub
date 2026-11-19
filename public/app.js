@@ -154,11 +154,59 @@ function drawPicker(isCall) {
   if(matches.length>35)add(root,'p','Первые 35 из '+format(matches.length)+'. Уточните название или выберите дорогу на карте.','note');
   if(!matches.length)add(root,'p','По запросу ничего не найдено.','note');
 }
+const stageNames={planned:'Запланирован',dispatched:'Выдан',started:'Начат',machine_reported:'Заявлен исполнителем',
+  inspector_verified:'Проверен инспектором',accepted:'Принят заказчиком',rejected:'Отклонён',disputed:'Оспорен'};
+const roleNames={dispatcher:'Диспетчер',operator:'Оператор',inspector:'Инспектор',customer:'Заказчик',executor:'Исполнитель'};
+const evidenceNames={dispatched:'Наряд',started:'Отметка начала операции',machine_reported:'Отчёт о выполнении операции',
+  inspector_verified:'Протокол осмотра',accepted:'Акт приёмки',rejected:'Акт замечаний',disputed:'Возражение исполнителя'};
+let orderEdge, orderRevision=0;
+function openOrder(edgeId){
+  orderEdge=edgeId;
+  const box=$('order-panel');box.open=true;
+  $('order-operation').replaceChildren(...Object.entries(data.workTypes).map(([value,title])=>new Option(title,value)));
+  const edge=edges.get(String(edgeId));
+  $('order-direction').replaceChildren(new Option('Прямое','f'));
+  if(!edge.oneway)$('order-direction').add(new Option('Обратное','r'));
+  $('order-road').textContent=roadOptions.get(String(edgeId));
+  refreshOrder();box.scrollIntoView({block:'center'});
+}
+async function refreshOrder(action){
+  if(orderEdge==null || !plan)return;
+  const revision=++orderRevision;
+  const body={shift:plan.input,shiftId:plan.id,edgeId:orderEdge,operation:$('order-operation').value,
+    scenario:$('order-case').value,reverse:$('order-direction').value==='r',withEvent:$('order-event').checked};
+  const key='sever-governance-v1:'+JSON.stringify([data.network.version,plan.id,orderEdge,body.operation,body.scenario,body.reverse,body.withEvent]);
+  const root=$('order-output');root.replaceChildren();
+  try{
+    const history=JSON.parse(localStorage.getItem(key)||'[]');
+    if(action)history.push({...action,at:new Date().toISOString()});
+    const result=await api('/api/orders/preview',{...body,history});
+    if(revision!==orderRevision)return;
+    if(action)localStorage.setItem(key,JSON.stringify(result.history));
+    const m=result.mandate;
+    add(root,'strong',{eligible:'Учебный допуск подтверждён',blocked:'Назначение заблокировано',manual_review:'Нужно ручное согласование'}[m.status]);
+    add(root,'p','Ответственный: '+(result.responsibility?.officer||'не подтверждён')+' · исполнитель: '+(result.responsibility?.executor||'не подтверждён'));
+    for(const reason of [...m.missing,...m.conflicts])add(root,'p',reason);
+    const clock=result.clock;
+    add(root,'p',clock.dueAt?'Учебный срок: '+new Date(clock.dueAt).toLocaleString('ru-RU',{timeZone:'Asia/Kamchatka'})+' (Камчатка), основание: '+result.rule.clause:
+      clock.status==='clock_unknown'?'Срок неизвестен: отсутствует подтверждённое начальное событие.':'Срок неизвестен: требуется проверка применимости правила.');
+    const route=result.routing;
+    if(route)add(root,'p',route.assigned?'Отдельный расчёт: '+route.vehicle+' · с возвратом '+format(route.minutes,1)+' мин · '+money(route.cost):route.reason);
+    add(root,'strong','Учебный журнал · '+stageNames[result.state]);
+    for(const e of result.history)add(root,'p',new Date(e.at).toLocaleString('ru-RU',{timeZone:'Asia/Kamchatka'})+' · '+roleNames[e.role]+' · '+stageNames[e.state]+' · '+e.evidence);
+    for(const next of result.actions){
+      const btn=add(root,'button',roleNames[next.role]+' · '+evidenceNames[next.state],'row-button');btn.type='button';
+      btn.onclick=()=>refreshOrder({...next,orderId:result.id,actor:roleNames[next.role]+' (учебная роль)',evidenceKind:next.state,evidence:evidenceNames[next.state]+' (образец)'});
+    }
+  }catch(error){if(revision===orderRevision)root.textContent='Не удалось открыть или сохранить наряд: '+error.message;}
+}
+
 function showRoad(id) {
   const root=$('map-info'), key=String(id),title=roadOptions.get(key);root.replaceChildren();root.hidden=!title;
   if(!title)return;
   const close=add(root,'button','×','row-button');close.type='button';close.setAttribute('aria-label','Закрыть карточку');close.onclick=()=>{root.hidden=true;};
   add(root,'strong',title);
+  const review=add(root,'button','Проверить учебный наряд','row-button');review.type='button';review.onclick=()=>openOrder(edges.get(key).id);
   const edgeTasks=byRoad.get(key)||[];
   for(const t of edgeTasks){
     const urgent=incidentIds.has(String(t.id));
@@ -242,6 +290,7 @@ function renderPlan(next) {
   $('time-start').textContent = clock(0); $('time-end').textContent = clock(plan.input.shiftMin);
   $('map-count').textContent = data.network.edges.length + ' дорожных участков · ' + plan.result.routes.length + ' маш. в смене';
   drawRoutes(); drawTasks(); drawSkipped(); refreshMap();
+  if(orderEdge!=null)refreshOrder();
 }
 function refreshMap() {
   const minute = Number($('minute').value);
@@ -374,4 +423,5 @@ document.querySelector('.tabs').addEventListener('click',e => {
     tab.classList.toggle('active',visible); tab.setAttribute('aria-pressed',String(visible)); $(tab.dataset.page).hidden = !visible;
   }
 });
+$('order-panel').addEventListener('change',()=>refreshOrder());
 init();
