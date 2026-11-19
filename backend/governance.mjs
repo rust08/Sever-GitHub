@@ -23,9 +23,10 @@ export function assessMandate({asset,responsibility,contract,resource,operation,
   else if(responsibility.assetId!==asset?.id || !responsibility.operations?.includes(operation) || !effective(responsibility,at))
     conflicts.push('Полномочия не охватывают объект, операцию или дату');
   if(!documented(contract))missing.push('Договор и адресное приложение с перечнем работ');
-  else if(!effective(contract,at) || !contract.assets?.includes(asset?.id) || !contract.operations?.includes(operation) ||
+  else if(!effective(contract,at))conflicts.push('На начало смены договор не действует');
+  else if(!contract.assets?.includes(asset?.id) || !contract.operations?.includes(operation) ||
     contract.executor!==responsibility?.executor || contract.customer!==responsibility?.authority)
-    conflicts.push('Работа вне границ, сторон или периода договора');
+    conflicts.push('Работа вне согласованных границ, сторон или видов работ договора');
   if(!documented(resource) || !resource.id || resource.permitted==null)missing.push('Карточка техники и допуск');
   else if(resource.permitted!==true || resource.executor!==responsibility?.executor || !resource.operations?.includes(operation))
     conflicts.push('Техника или допуск не соответствуют работе');

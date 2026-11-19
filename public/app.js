@@ -160,6 +160,20 @@ const roleNames={dispatcher:'Диспетчер',operator:'Оператор',ins
 const evidenceNames={dispatched:'Наряд',started:'Отметка начала операции',machine_reported:'Отчёт о выполнении операции',
   inspector_verified:'Протокол осмотра',accepted:'Акт приёмки',rejected:'Акт замечаний',disputed:'Возражение исполнителя'};
 let orderEdge, orderRevision=0;
+function syncOrderVehicles(){
+  const select=$('order-vehicle'), previous=select.value;
+  const fleet=(plan.input.fleet??data.fleet).filter(v=>plan.input.vehicleIds.includes(v.id));
+  select.replaceChildren(...fleet.map(v=>new Option(v.type?v.name+' · '+v.type:v.name,v.id)));
+  if(fleet.some(v=>v.id===previous))select.value=previous;
+  $('order-offset').max=plan.input.shiftMin;
+}
+function downloadOrder(report){
+  const blob=new Blob([JSON.stringify(report,null,2)],{type:'application/json;charset=utf-8'});
+  const url=URL.createObjectURL(blob), link=document.createElement('a');
+  link.href=url;link.download='sever-order-'+report.shift.date+'.json';
+  document.body.append(link);link.click();link.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
 function openOrder(edgeId){
   orderEdge=edgeId;
   const box=$('order-panel');box.open=true;
@@ -168,15 +182,23 @@ function openOrder(edgeId){
   $('order-direction').replaceChildren(new Option('Прямое','f'));
   if(!edge.oneway)$('order-direction').add(new Option('Обратное','r'));
   $('order-road').textContent=roadOptions.get(String(edgeId));
+  if(plan)syncOrderVehicles();
   refreshOrder();box.scrollIntoView({block:'center'});
 }
 async function refreshOrder(action){
   if(orderEdge==null || !plan)return;
   const revision=++orderRevision;
-  const body={shift:plan.input,shiftId:plan.id,edgeId:orderEdge,operation:$('order-operation').value,
-    scenario:$('order-case').value,reverse:$('order-direction').value==='r',withEvent:$('order-event').checked};
-  const key='sever-governance-v1:'+JSON.stringify([data.network.version,plan.id,orderEdge,body.operation,body.scenario,body.reverse,body.withEvent]);
+  const offset=$('order-offset'), vehicle=$('order-vehicle');
+  offset.disabled=!$('order-event').checked;
   const root=$('order-output');root.replaceChildren();
+  if(!offset.disabled && (!offset.value || !offset.checkValidity())){
+    root.textContent='Введите целое число минут от 0 до '+plan.input.shiftMin+'.';return;
+  }
+  const body={vehicleId:vehicle.value,eventOffsetMin:offset.disabled?0:offset.valueAsNumber,shift:plan.input,shiftId:plan.id,edgeId:orderEdge,operation:$('order-operation').value,
+    scenario:$('order-case').value,reverse:$('order-direction').value==='r',withEvent:$('order-event').checked};
+  const parts=[data.network.version,plan.id,orderEdge,body.operation,body.scenario,body.reverse,body.withEvent];
+  if(vehicle.selectedIndex>0 || body.eventOffsetMin)parts.push(body.vehicleId,body.eventOffsetMin);
+  const key='sever-governance-v1:'+JSON.stringify(parts);
   try{
     const history=JSON.parse(localStorage.getItem(key)||'[]');
     if(action)history.push({...action,at:new Date().toISOString()});
@@ -187,6 +209,9 @@ async function refreshOrder(action){
     add(root,'strong',{eligible:'Учебный допуск подтверждён',blocked:'Назначение заблокировано',manual_review:'Нужно ручное согласование'}[m.status]);
     add(root,'p','Ответственный: '+(result.responsibility?.officer||'не подтверждён')+' · исполнитель: '+(result.responsibility?.executor||'не подтверждён'));
     for(const reason of [...m.missing,...m.conflicts])add(root,'p',reason);
+    const localTime=value=>new Date(value).toLocaleString('ru-RU',{timeZone:'Asia/Kamchatka'});
+    if(result.contract)add(root,'p','Учебный договор действует до '+localTime(result.contract.end)+' (Камчатка), исключая этот момент.');
+    if(result.event)add(root,'p','Снегопад закончился '+localTime(result.event.at)+' (учебное событие, Камчатка).');
     const clock=result.clock;
     add(root,'p',clock.dueAt?'Учебный срок: '+new Date(clock.dueAt).toLocaleString('ru-RU',{timeZone:'Asia/Kamchatka'})+' (Камчатка), основание: '+result.rule.clause:
       clock.status==='clock_unknown'?'Срок неизвестен: отсутствует подтверждённое начальное событие.':'Срок неизвестен: требуется проверка применимости правила.');
@@ -194,6 +219,13 @@ async function refreshOrder(action){
     if(route)add(root,'p',route.assigned?'Отдельный расчёт: '+route.vehicle+' · с возвратом '+format(route.minutes,1)+' мин · '+money(route.cost):route.reason);
     add(root,'strong','Учебный журнал · '+stageNames[result.state]);
     for(const e of result.history)add(root,'p',new Date(e.at).toLocaleString('ru-RU',{timeZone:'Asia/Kamchatka'})+' · '+roleNames[e.role]+' · '+stageNames[e.state]+' · '+e.evidence);
+    const report={formatVersion:1,notice:'Учебная симуляция. Все договоры, сроки и записи исполнения в этой карточке условные.',
+      networkVersion:data.network.version,shift:{id:body.shiftId,date:body.shift.date,start:body.shift.start,timeZone:'Asia/Kamchatka',
+        minutes:body.shift.shiftMin,budgetRub:body.shift.budget},road:$('order-road').textContent,edgeId:body.edgeId,
+      direction:body.reverse?'Обратное':'Прямое',vehicleId:body.vehicleId,vehicleLabel:vehicle.selectedOptions[0].textContent,
+      scenario:body.scenario,operationName:data.workTypes[body.operation],...result};
+    const download=add(root,'button','Скачать карточку наряда (JSON)','row-button');
+    download.type='button';download.onclick=()=>downloadOrder(report);
     for(const next of result.actions){
       const btn=add(root,'button',roleNames[next.role]+' · '+evidenceNames[next.state],'row-button');btn.type='button';
       btn.onclick=()=>refreshOrder({...next,orderId:result.id,actor:roleNames[next.role]+' (учебная роль)',evidenceKind:next.state,evidence:evidenceNames[next.state]+' (образец)'});
@@ -290,7 +322,7 @@ function renderPlan(next) {
   $('time-start').textContent = clock(0); $('time-end').textContent = clock(plan.input.shiftMin);
   $('map-count').textContent = data.network.edges.length + ' дорожных участков · ' + plan.result.routes.length + ' маш. в смене';
   drawRoutes(); drawTasks(); drawSkipped(); refreshMap();
-  if(orderEdge!=null)refreshOrder();
+  if(orderEdge!=null){syncOrderVehicles();refreshOrder();}
 }
 function refreshMap() {
   const minute = Number($('minute').value);

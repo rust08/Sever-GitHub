@@ -59,3 +59,30 @@ test('T05/T25/T26 independent attributed evidence for each stage; no GPS accepta
   await assert.rejects(preview({scenario:'unknown',history}));
 });
 
+test('selected shift vehicle determines the route and owns its journal',async()=>{
+  const pair={...shift,vehicleIds:['kdm-01','kdm-02']};
+  const first=await preview({shift:pair});
+  const second=await preview({shift:pair,vehicleId:'kdm-02'});
+  assert.equal(first.id,(await preview({shift:pair,vehicleId:'kdm-01'})).id);
+  assert.equal(second.resource.id,'kdm-02');
+  assert.equal(second.routing.vehicle,'КДМ-02');
+  assert.notEqual(first.id,second.id);
+  await assert.rejects(preview({shift:pair,vehicleId:'kdm-02',history:[step(first,'dispatched','dispatcher')]}));
+  await assert.rejects(preview({vehicleId:'kdm-02'}),/машину/);
+});
+test('contract ending exactly at shift start blocks routing and dispatch',async()=>{
+  const p=await preview({scenario:'expired'});
+  assert.ok(Date.parse(p.contract.start)<Date.parse(p.contract.end));
+  assert.equal(p.mandate.status,'blocked');
+  assert.ok(p.mandate.conflicts.some(reason=>reason.includes('не действует')));
+  assert.equal(p.routing,null);assert.deepEqual(p.actions,[]);
+});
+test('event time moves the illustrative deadline across local midnight',async()=>{
+  const args={shift:{...shift,start:'23:40'},withEvent:true};
+  const p=await preview({...args,eventOffsetMin:45});
+  assert.equal(p.event.at,'2026-11-20T12:25:00.000Z');
+  assert.equal(p.clock.dueAt,'2026-11-20T14:25:00.000Z');
+  assert.notEqual(p.id,(await preview(args)).id);
+  for(const eventOffsetMin of [-1,0.5,241])await assert.rejects(preview({...args,eventOffsetMin}),/Время события/);
+  assert.equal((await preview({eventOffsetMin:45})).clock.status,'clock_unknown');
+});
