@@ -1,0 +1,377 @@
+import { RoadMap } from './map.js';
+
+const $ = id => document.getElementById(id);
+const format = (value, digits = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: digits }).format(value);
+const money = value => format(value) + ' ₽';
+const colors = ['#0368a6','#ad5414','#00816c','#8c4797','#aa3556','#436a39','#5358ab','#795433'];
+let data, plan, roadMap;
+let tasks = new Map();
+let edges = new Map();
+const roadOptions = new Map(), byRoad=new Map(), callOptions=new Map();
+let closedRoads=new Set(), incidentIds=new Set();
+let saving = false;
+let scheduledTasks = new Map(), skippedTasks = new Map();
+const pickColor = id => colors[Math.max(0,plan?.result.routes.findIndex(v => v.vehicleId === id) ?? 0) % colors.length];
+
+function add(parent, tag, value, className) {
+  const child = document.createElement(tag);
+  if (value != null) child.textContent = value;
+  if (className) child.className = className;
+  parent.append(child);
+  return child;
+}
+function table(parent, headers) {
+  const el = add(add(parent, 'div', null, 'table-wrap'), 'table');
+  const tr = add(add(el, 'thead'), 'tr');
+  for (const header of headers) add(tr, 'th', header).scope = 'col';
+  return add(el, 'tbody');
+}
+function clock(offset) {
+  const [hours, minutes] = (plan?.input.start || $('start').value || '08:00').split(':').map(Number);
+  const time = hours * 60 + minutes + Math.ceil(offset);
+  return String(Math.floor(time / 60) % 24).padStart(2, '0') + ':' + String(time % 60).padStart(2, '0') + (time >= 1440 ? ' (+1)' : '');
+}
+async function api(path, payload) {
+  if (globalThis.severDemo) return globalThis.severDemo.request(path,payload);
+  const options = payload ? { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) } : {};
+  const response = await fetch(path, options);
+  let body;
+  try { body = await response.json(); } catch { throw new Error('Сервер вернул нечитаемый ответ.'); }
+  if (!response.ok) throw new Error(body?.error?.message || body?.error || 'Ошибка расчёта');
+  return body;
+}
+function initialDate() {
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Kamchatka', year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date());
+}
+function markChanged() {
+  $('save-state').textContent = 'Изменения ожидают расчёта. Маршруты и времена относятся к сохранённому плану.';
+}
+function addVehicle(vehicle, active, open=false) {
+  const row = add($('fleet'),'div',null,'fleet-item');
+  row.dataset.id=vehicle.id;
+  const head=add(row,'label',null,'pick');
+  const enabled=add(head,'input'); enabled.type='checkbox'; enabled.value=vehicle.id; enabled.checked=active;
+  const caption=add(head,'span',vehicle.name); enabled.setAttribute('aria-label','Включить в смену: '+vehicle.name);
+  const editor=add(row,'details');editor.open=open;add(editor,'summary','Характеристики');
+  const fields=add(editor,'div',null,'fleet-fields');
+  for(const [key,label] of Object.entries({name:'Название',type:'Тип техники',rate:'Тариф, ₽/ч',workKmh:'Расчистка, км/ч',driveKmh:'Переезд, км/ч'})){
+    const field=add(add(fields,'label',label),'input');
+    field.dataset.field=key;field.required=true;
+    if(key==='name'||key==='type'){
+      field.type='text';field.maxLength=120;
+      field.value=vehicle[key] || (key==='type'?'Снегоуборочная машина':'');
+    }else{
+      field.type='number';field.min=key==='rate'?'0.01':'0';field.max=key==='rate'?'1000000':'200';field.step='any';field.value=vehicle[key];
+    }
+    field.addEventListener('invalid',()=>{editor.open=true;});
+    if(key==='name')field.oninput=()=>{
+      caption.textContent=field.value||'Машина';enabled.setAttribute('aria-label','Включить в смену: '+caption.textContent);
+    };
+  }
+  const remove=add(editor,'button','Удалить из парка','row-button');remove.type='button';
+  remove.onclick=()=>{row.remove();markChanged();$('add-vehicle').focus();};
+  return row;
+}
+function populate(input) {
+  $('date').value = input?.date || initialDate();
+  $('start').value = input?.start || '08:00';
+  $('duration').value = input?.shiftMin ?? 240;
+  $('budget').value = input?.budget ?? 30000;
+  $('strategy').value = input?.strategy ?? 'parallel';
+  $('fleet').replaceChildren();
+  for (const vehicle of input?.fleet ?? data.fleet) {
+    addVehicle({...vehicle,rate:input?.rates?.[vehicle.id] ?? vehicle.rate},input ? input.vehicleIds.includes(vehicle.id) : true);
+  }
+  closedRoads = new Set((input?.closed || []).map(String).filter(id=>edges.has(id)));
+  const counts=new Map();
+  for (const edge of data.network.edges) {
+    const name=edge.name || 'Проезд без названия';
+    const ordinal=(counts.get(name)||0)+1;
+    counts.set(name,ordinal);
+    roadOptions.set(String(edge.id),name+' · участок '+ordinal+' · '+Math.round(edge.km*1000)+' м');
+  }
+  for (const task of data.tasks) {
+    const key=String(task.edgeId);
+    if (!byRoad.has(key)) byRoad.set(key,[]);
+    byRoad.get(key).push(task);
+    callOptions.set(String(task.id),task);
+  }
+  if(data.network.scope==='city') {
+    for(const [key,edge] of edges) {
+      if(edge.routable===false || byRoad.has(key)) continue;
+      const directions=edge.oneway?[false]:[false,true];
+      const passes=directions.map(reverse=>({
+        id:'pass:'+key+':'+(reverse?'r':'f'), edgeId:edge.id, reverse, optional:true,
+        name:(edge.name || 'Участок '+key)+(reverse?' · обратно':'')
+      }));
+      byRoad.set(key,passes);
+      for(const pass of passes)callOptions.set(pass.id,pass);
+    }
+  }
+  incidentIds=new Set((input?.incidents ?? data.defaultIncidents).map(String).filter(id=>callOptions.has(id)));
+  const search=add($('incidents').parentElement,'input');
+  search.type='search'; search.placeholder='Найти улицу для вызова'; search.id='call-search';
+  search.setAttribute('aria-label',search.placeholder); $('incidents').before(search);
+  search.oninput=()=>drawPicker(true);
+  drawPicker(false); drawPicker(true);
+}
+function locate(edgeId) {
+  roadMap?.focus(edgeId);
+  $('map').scrollIntoView({block:'center',behavior:'smooth'});
+}
+function direction(task) {return task.reverse?'обратный проход':'прямой проход';}
+function toggleEntry(isCall,id) {
+  if(saving)return;
+  const selected=isCall?incidentIds:closedRoads;
+  if(selected.has(id))selected.delete(id); else selected.add(id);
+  drawPicker(isCall); syncDraft(); markChanged();
+}
+function syncDraft() {
+  $('closed-count').textContent=closedRoads.size;
+  roadMap?.updateDraft([...closedRoads]);
+  roadMap?.updateIncidents([...incidentIds]);
+  if(roadMap?.selected!=null)showRoad(roadMap.selected);
+}
+function drawPicker(isCall) {
+  const selected=isCall?incidentIds:closedRoads;
+  const root=$(isCall?'incidents':'closures'); root.replaceChildren();
+  const term=$(isCall?'call-search':'road-search').value.trim().toLocaleLowerCase('ru');
+  const entries=isCall?callOptions:edges;
+  const matches=[];
+  for (const [id,entry] of entries) {
+    const edgeId=isCall?String(entry.edgeId):id;
+    const title=roadOptions.get(edgeId)+(isCall?' · '+direction(entry):'');
+    if ((!term || title.toLocaleLowerCase('ru').includes(term))) matches.push({id,edgeId,title});
+  }
+  matches.sort((a,b)=>Number(selected.has(b.id))-Number(selected.has(a.id)));
+  for (const {id,edgeId,title} of matches.slice(0,35)) {
+    const row=add(root,'div',null,'road-option');
+    const check=add(row,'input'); check.type='checkbox';check.checked=selected.has(id);
+    check.setAttribute('aria-label',(isCall?'Срочный вызов: ':'Перекрытие: ')+title);
+    check.onchange=()=>toggleEntry(isCall,id);
+    const btn=add(row,'button',title,'row-button');btn.type='button';btn.onclick=()=>locate(edgeId);
+  }
+  if(matches.length>35)add(root,'p','Первые 35 из '+format(matches.length)+'. Уточните название или выберите дорогу на карте.','note');
+  if(!matches.length)add(root,'p','По запросу ничего не найдено.','note');
+}
+function showRoad(id) {
+  const root=$('map-info'), key=String(id),title=roadOptions.get(key);root.replaceChildren();root.hidden=!title;
+  if(!title)return;
+  const close=add(root,'button','×','row-button');close.type='button';close.setAttribute('aria-label','Закрыть карточку');close.onclick=()=>{root.hidden=true;};
+  add(root,'strong',title);
+  const edgeTasks=byRoad.get(key)||[];
+  for(const t of edgeTasks){
+    const urgent=incidentIds.has(String(t.id));
+    const status=urgent?'P1 · срочный вызов':t.optional?'транзитный проезд':'P'+t.priority+' · '+t.reason;
+    add(root,'p',direction(t)+' · '+status);
+    const item=scheduledTasks.get(String(t.id)),minute=Number($('minute').value);
+    if(item) {
+      const {leg,route}=item;
+      const state=minute<leg.startMin?'Запланирован':minute<leg.endMin?'В работе по плану':'Завершён по плану';
+      add(root,'p',state+' · '+route.name+' · '+clock(leg.startMin)+'–'+clock(leg.endMin));
+    } else if(skippedTasks.has(String(t.id))) add(root,'p',skippedTasks.get(String(t.id)));
+    const btn=add(root,'button',urgent?'Снять срочный вызов':'Подтвердить срочный вызов','row-button');
+    btn.type='button';btn.disabled=saving;btn.onclick=()=>toggleEntry(true,String(t.id));
+  }
+  if(!edgeTasks.length)add(root,'p','Проезд техники по участку недоступен в дорожной модели.');
+  const blocked=closedRoads.has(key);
+  const pending=(plan?.input.closed||[]).some(v=>String(v)===key)!==blocked;
+  add(root,'p',(blocked?'Закрыт':'Открыт')+(pending?' · ожидает пересчёта':''));
+  const btn=add(root,'button',blocked?'Открыть проезд':'Закрыть проезд','row-button');
+  btn.type='button';btn.disabled=saving;btn.onclick=()=>toggleEntry(false,key);
+}
+function readInput() {
+  const checked = id => [...$(id).querySelectorAll('input[type=checkbox]:checked')].map(el => el.value);
+  const fleet=[...$('fleet').children].map(row=>{
+    const vehicle={id:row.dataset.id};
+    for(const el of row.querySelectorAll('[data-field]'))vehicle[el.dataset.field]=el.type==='number'?el.valueAsNumber:el.value.trim();
+    return vehicle;
+  });
+  const rates=Object.fromEntries(fleet.map(v=>[v.id,v.rate]));
+  return {date:$('date').value,start:$('start').value,shiftMin:$('duration').valueAsNumber,budget:$('budget').valueAsNumber,
+    vehicleIds:checked('fleet'),closed:[...closedRoads].map(id => edges.get(id).id),
+    incidents:[...incidentIds].filter(id=>callOptions.has(id)).map(id=>callOptions.get(id).id),rates,fleet,strategy:$('strategy').value};
+}
+async function calculate() {
+  if (saving || !$('settings').reportValidity()) return;
+  const input = readInput();
+  if (!input.vehicleIds.length) { $('status').textContent = 'Выберите хотя бы одну машину.'; return; }
+  saving = true;
+  $('settings').inert = true;
+  $('submit').disabled = true;
+  $('status').textContent = 'Строим маршруты и проверяем ограничения…';
+  try {
+    const response = await api('/api/plans',input);
+    renderPlan(response);
+    $('status').textContent = '';
+  } catch (error) { $('status').textContent = 'Расчёт не выполнен. ' + error.message; }
+  finally {saving = false; $('settings').inert = false; $('submit').disabled = false;if(roadMap?.selected!=null)showRoad(roadMap.selected);}
+}
+function renderPlan(next) {
+  plan = next;
+  $('shift-date').textContent = new Intl.DateTimeFormat('ru-RU', {day:'numeric',month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(plan.input.date+'T00:00:00Z'));
+  const ranked = new Map((plan.result.priorities || []).map(t => [String(t.id),t]));
+  tasks = new Map(data.tasks.map(t => [String(t.id), {...t,...ranked.get(String(t.id))}]));
+  for(const [id,override] of ranked) {
+    const option=callOptions.get(id);
+    if(option?.optional)tasks.set(id,{...option,...override});
+  }
+  const summary = plan.result.summary;
+  scheduledTasks=new Map();
+  for (const route of plan.result.routes) for (const leg of route.legs) if (leg.type==='work') scheduledTasks.set(String(leg.taskId),{route,leg});
+  skippedTasks=new Map(plan.result.unassigned.map(item=>[String(item.taskId),item.reason]));
+  const coverage=plan.result.coverage;
+  $('save-state').textContent = 'Сохранённый план · ' + plan.input.date.split('-').reverse().join('.') + ' · ' + plan.input.start;
+  if(!plan.input.strategy)$('save-state').textContent += '. Архивный расчёт. Чтобы применить новый режим, нажмите «Рассчитать план».';
+  $('metrics').replaceChildren();
+  for (const [name,value] of [
+    ['Заданий в плане',summary.assigned + ' / ' + summary.total],
+    ['В срок из назначенных',summary.onTime + ' / ' + summary.assigned],
+    ['Расходы смены',money(summary.cost)],
+    ['Дороги со всеми проходами',coverage ? format(coverage.fullyAssignedKm,1)+' / '+format(coverage.requiredNetworkKm,1)+' км' : 'Нет архивных данных'],
+    ['Холостой пробег',format(summary.deadKm,1) + ' км'],
+  ]) { const tile = add($('metrics'),'div',null,'metric'); add(tile,'span',name); add(tile,'strong',value); }
+  add($('metrics').children[1],'small','P1 в срок · '+summary.urgentOnTime+' из '+summary.urgentTotal,'sub');
+  add($('metrics').children[2],'small','Лимит '+money(plan.input.budget),'sub');
+  if(coverage)add($('metrics').children[3],'small','Частично · '+format(coverage.partiallyAssignedKm,1)+' км. Сеть · '+format(coverage.networkKm,1)+' км','sub');
+  const selected = $('filter').value;
+  $('filter').replaceChildren(new Option('Все машины',''), ...plan.result.routes.map(r => new Option(r.name,r.vehicleId)));
+  if (plan.result.routes.some(r => String(r.vehicleId) === selected)) $('filter').value = selected;
+  $('minute').max = plan.input.shiftMin;
+  $('minute').value = 0;
+  $('time-start').textContent = clock(0); $('time-end').textContent = clock(plan.input.shiftMin);
+  $('map-count').textContent = data.network.edges.length + ' дорожных участков · ' + plan.result.routes.length + ' маш. в смене';
+  drawRoutes(); drawTasks(); drawSkipped(); refreshMap();
+}
+function refreshMap() {
+  const minute = Number($('minute').value);
+  $('clock').value = clock(minute);
+  roadMap?.show(plan, $('filter').value, minute);
+  if(roadMap?.selected!=null && !$('map-info').hidden)showRoad(roadMap.selected);
+  const list = $('vehicle-status');list.replaceChildren();
+  for (const [index,route] of (plan?.result.routes || []).entries()) {
+    if ($('filter').value && $('filter').value !== String(route.vehicleId)) continue;
+    const leg = route.legs.find(item => minute >= item.startMin && minute < item.endMin);
+    const row = add(list,'div',null,'vehicle-position');
+    add(row,'b',String(index+1)).style.background=pickColor(route.vehicleId);
+    add(row,'strong',route.name);
+    add(row,'span',leg ? (leg.type==='work'?'Расчистка · ':'Переезд · ')+(leg.name||'Проезд')+' до '+clock(leg.endMin) : 'На базе');
+  }
+}
+function selectLeg(route, leg) {
+  $('filter').value = route.vehicleId;
+  $('minute').value = leg.startMin;
+  refreshMap(); roadMap.focus(leg.edgeId);
+  $('map').scrollIntoView({block:'center',behavior:'smooth'});
+}
+function drawRoutes() {
+  const root = $('routes'); root.replaceChildren();
+  add(root,'p','Местное время. Выберите этап, чтобы увидеть участок и машину на карте.','sub');
+  for (const [i,route] of plan.result.routes.entries()) {
+    if ($('filter').value && String(route.vehicleId) !== $('filter').value) continue;
+    const sheet = add(root,'details',null,'sheet'); sheet.open = i === 0 || Boolean($('filter').value);
+    const head = add(sheet,'summary');
+    add(head,'i',null,'chip').style.background = pickColor(route.vehicleId);
+    add(head,'span',route.name + ' · ' + format(route.minutes) + ' мин · ' + money(route.cost));
+    if (!route.legs.length) {add(sheet,'p','Резерв, задания отсутствуют.','empty');continue;}
+    const body = table(sheet,['Время','Операция','Участок','Карта']);
+    for (const leg of route.legs) {
+      const tr = add(body,'tr');
+      add(tr,'td',clock(leg.startMin) + '–' + clock(leg.endMin),'nowrap');
+      add(tr,'td',leg.type === 'work' ? 'Расчистка' : 'Переезд');
+      const road = add(tr,'td',leg.name || edges.get(String(leg.edgeId))?.name || String(leg.edgeId));
+      if (leg.type === 'work') {
+        const task = tasks.get(String(leg.taskId));
+        if (task) add(road,'small','P' + task.priority + ' · цель к ' + clock(task.targetMin) + ' · ' + (leg.endMin <= task.targetMin ? 'в срок' : 'позже цели'),'leg-status');
+      }
+      const button = add(add(tr,'td'),'button','Показать','row-button');button.addEventListener('click',() => selectLeg(route,leg));
+    }
+  }
+}
+function drawTasks() {
+  const root = $('tasks');root.replaceChildren();
+  add(root,'h3','Правила очередности');
+  add(root,'p','Проектные целевые сроки отсчитываются от начала смены. Правила и признаки требуют согласования с дорожной службой.','sub');
+  const grid = add(root,'div',null,'policy');
+  for (const item of data.policy) {
+    const rule = add(grid,'div',null,'rule');add(rule,'strong','P' + item.level + ' · ' + item.title);
+    add(rule,'p',item.rule); add(rule,'p','Цель — ' + item.targetMin + ' мин.');
+  }
+  const solved = new Map();
+  for (const route of plan.result.routes) for (const leg of route.legs) if (leg.type === 'work') solved.set(String(leg.taskId),{route,leg});
+  const body = table(root,['Приоритет','Участок и основание','Цель','Назначение']);
+  pagedRows(body,[...tasks.values()].sort((a,b) => a.priority-b.priority || a.name.localeCompare(b.name,'ru')),task=>{
+    const tr = add(body,'tr');add(tr,'td','P'+task.priority,'prio');
+    const details = add(add(tr,'td'),'details');add(details,'summary',task.name);
+    add(details,'p',task.reason);add(details,'small','Участок ' + task.edgeId + ' · ' + (task.reverse ? 'обратное направление' : 'прямое направление'));
+    add(tr,'td',clock(task.targetMin),'nowrap');
+    const item = solved.get(String(task.id));
+    add(tr,'td',item ? item.route.name + ' · ' + clock(item.leg.startMin) + '–' + clock(item.leg.endMin) : 'Без назначения');
+  });
+}
+function pagedRows(body,items,draw) {
+  const panel=body.closest('.page');
+  let offset=0;
+  const next=add(panel,'button','', 'row-button');next.type='button';
+  function append(){
+    for(const item of items.slice(offset,offset+60))draw(item);
+    offset+=60;
+    next.hidden=offset>=items.length;
+    next.textContent='Показать ещё · осталось '+format(Math.max(0,items.length-offset));
+  }
+  next.onclick=append;append();
+}
+function drawSkipped() {
+  const root = $('unassigned'); root.replaceChildren();
+  const entries = plan.result.unassigned;
+  document.querySelector('[data-page=unassigned]').textContent = 'Без назначения · ' + entries.length;
+  if (!entries.length) {add(root,'p','Все задания включены в план.','empty'); return;}
+  const body = table(root,['Участок','Приоритет','Причина']);
+  pagedRows(body,entries,item=>{
+    const task = tasks.get(String(item.taskId));
+    const row = add(body,'tr');add(row,'td',task?.name || item.taskId);add(row,'td','P'+(task?.priority || '—'));add(row,'td',item.reason);
+  });
+}
+async function init() {
+  $('hosted-sharing').hidden=Boolean(globalThis.severDemo) || ['localhost','127.0.0.1','[::1]'].includes(location.hostname);
+  try {
+    data = await api('/api/data');
+    edges = new Map(data.network.edges.map(edge => [String(edge.id),edge]));
+    tasks = new Map(data.tasks.map(task => [String(task.id),task]));
+    populate(data.latest?.input);
+    $('workspace').hidden = false;
+    roadMap = new RoadMap($('map'),data.network,pickColor,showRoad,data.tasks);
+    syncDraft();
+    $('status').textContent = '';
+    if (data.latest) renderPlan(data.latest); else await calculate();
+  } catch(error) {
+    $('status').textContent = 'Не удалось загрузить пульт. ' + error.message;
+    add($('status'),'button','Повторить').onclick = () => location.reload();
+  }
+}
+$('jump-routes').addEventListener('click', () => document.querySelector('[data-page=routes]').click());
+$('settings').addEventListener('submit',e => {e.preventDefault(); calculate();});
+$('settings').addEventListener('input',e => {
+  if (e.target.type === 'search') return;
+  markChanged();
+});
+$('add-vehicle').onclick=()=>{
+  const row=addVehicle({id:'v-'+crypto.randomUUID(),name:'Машина '+($('fleet').children.length+1),type:'Снегоуборочная машина',rate:4000,workKmh:8,driveKmh:20},true,true);
+  row.querySelector('[data-field=name]').select();markChanged();
+};
+$('road-search').addEventListener('input',e => {
+  drawPicker(false);
+});
+$('minute').addEventListener('input',refreshMap);
+$('filter').addEventListener('change',() => {refreshMap(); if(plan)drawRoutes();});
+$('zoom-in').onclick = () => roadMap?.zoom(1.5);
+$('zoom-out').onclick = () => roadMap?.zoom(1/1.5);
+$('fit').onclick = () => roadMap?.fit();
+document.querySelector('.tabs').addEventListener('click',e => {
+  const button = e.target.closest('[data-page]'); if (!button) return;
+  for (const tab of document.querySelectorAll('[data-page]')) {
+    const visible = tab === button;
+    tab.classList.toggle('active',visible); tab.setAttribute('aria-pressed',String(visible)); $(tab.dataset.page).hidden = !visible;
+  }
+});
+init();

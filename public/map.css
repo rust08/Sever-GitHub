@@ -1,0 +1,15 @@
+#map{height:100%;width:100%;z-index:0;background:#dfe8dc}
+.map-wrap{height:clamp(390px,52vh,610px)}
+.map-wrap .leaflet-overlay-pane canvas{cursor:inherit}
+.map-wrap .leaflet-interactive{cursor:pointer}
+.map-wrap .map-buttons{z-index:2;box-shadow:0 2px 7px #253f4826}
+.map-wrap .map-info{z-index:3;max-height:72%;overflow:auto;bottom:28px;max-width:min(390px,80%);padding:10px}
+.map-wrap .credits{position:absolute;z-index:1;bottom:0;right:0;background:#ffffffdd;color:#344d56;font-size:.72rem;padding:2px 5px}
+.credits a{color:inherit}
+.map-toolbar{display:flex;align-items:center;gap:6px 18px;flex-wrap:wrap;padding:3px 17px 9px}
+.map-toolbar select{width:auto}
+.snow-truck span{display:grid;place-items:center;border:2px solid white;border-radius:50%;height:100%;width:100%;color:white;font:700 12px/1 'Segoe UI',sans-serif;box-shadow:0 1px 5px #172e3780}
+.snow-depot{font:700 17px/1 sans-serif;color:#243a4b;text-shadow:0 0 3px white}
+#map-legend i:not(:empty){border:0;width:auto;color:#243a4b;font-style:normal}
+@media(max-width:700px){.map-wrap{height:410px}.map-wrap .map-info{max-width:85%}}
+.snow-truck.grouped span{border-radius:12px;white-space:nowrap}

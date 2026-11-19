@@ -1,0 +1,39 @@
+# Local data and build output
+runtime/
+dist/
+outputs/
+node_modules/
+*.log
+*.sqlite
+*.sqlite-*
+*.sqlite3
+*.db
+*.db-wal
+*.db-shm
+
+# Local credentials and editor settings
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.pfx
+.wrangler/
+.codex/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Downloaded extracts, handoffs, and Python caches
+*.pbf
+*.osm
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.7z
+__pycache__/
+*.py[cod]
+.venv/
