@@ -35,7 +35,7 @@ export function assessMandate({asset,responsibility,contract,resource,operation,
 }
 
 export function assessClock({asset,operation,rule,event}) {
-  if(!documented(rule) || !rule.version || !rule.clause || !asset?.legalClass || asset.legalClass!==rule.legalClass ||
+  if(!documented(asset) || !documented(rule) || !rule.clockStart || !rule.territory || !rule.version || !rule.clause || !asset?.legalClass || asset.legalClass!==rule.legalClass ||
     asset.territory!==rule.territory || rule.operation!==operation || !(rule.minutes>0) || !Number.isFinite(rule.minutes))
     return {status:'needs_review'};
   if(!documented(event) || !event.id || !dated(event.at) || event.kind!==rule.clockStart || event.assetId!==asset.id)
@@ -58,7 +58,7 @@ export function recordStep(order,history,entry) {
   if(entry.state==='dispatched' && !order.dispatchable)throw Error('Сначала нужны допуск и маршрут');
   if(!entry.actor?.trim() || !dated(entry.at) || (previous && Date.parse(entry.at)<Date.parse(previous.at)))
     throw Error('Проверьте автора и время записи');
-  if(!entry.evidence?.trim() || entry.evidenceKind==='gps')throw Error('Нужна запись о конкретной операции');
+  if(!entry.evidence?.trim() || entry.evidenceKind!==entry.state)throw Error('Нужна запись о конкретной операции');
   return [...history,{...entry}];
 }
 
