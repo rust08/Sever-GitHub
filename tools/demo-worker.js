@@ -16,6 +16,8 @@ self.onmessage=async ({data:message})=>{
         latest={id:snapshot.id,input:snapshot.input,result:await decodeShiftResult(snapshot.result)};
       }
       self.postMessage({seq,value:{...catalog,latest}});
+    }else if(path==='/api/orders/preview'){
+      self.postMessage({seq,value:evaluateOrder(catalog,input)});
     }else if(path==='/api/plans'){
       const value=calculateShift(catalog,input);
       const stored={version:catalog.network.version,id:value.id,input:value.input,result:await encodeShiftResult(value.result)};
