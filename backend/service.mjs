@@ -1,9 +1,11 @@
+import {previewOrder} from './order-preview.mjs';
+import {workTypes} from './governance.mjs';
 import {policy, passesForEdge, fleetSeed, makePasses} from './policy.mjs';
 import {plan} from './planner.mjs';
 // Immutable city geography is loaded once per server/worker. SQL holds saved shifts.
 export function createCatalog(network) {
   if (network.scope !== 'city' || !network.version) throw new Error('Нужен версионный снимок городской сети');
-  return {network, tasks:makePasses(network), fleet:fleetSeed, policy, defaultIncidents:[]};
+  return {network, workTypes, tasks:makePasses(network), fleet:fleetSeed, policy, defaultIncidents:[]};
 }
 export class InputError extends Error {}
 function ensure(valid,message) { if (!valid) throw new InputError(message); }
@@ -98,7 +100,13 @@ export function calculateShift(data,body) {
   return {id,input,result};
 }
 
+export function evaluateOrder(data,body) {
+  ensure(body && typeof body.shiftId==='string' && body.shiftId.length<=100,'Сначала сохраните смену');
+  const input=validate(body.shift,data);
+  try{return previewOrder(data,input,body)}catch(error){throw new InputError(error.message)}
+}
 export async function api(db,method,path,body,data) {
+  if(method==='POST' && path==='/api/orders/preview')return evaluateOrder(data,body);
   if (method==='GET' && path==='/api/data') {
     const [latest]=await db.rows('SELECT id,input_json,result_json FROM city_plans WHERE network_version=? ORDER BY seq DESC LIMIT 1',[data.network.version]);
     return {...data,latest:latest?{id:latest.id,input:JSON.parse(latest.input_json),result:await decodeShiftResult(latest.result_json)}:null};
