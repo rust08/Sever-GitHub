@@ -86,3 +86,23 @@ test('event time moves the illustrative deadline across local midnight',async()=
   for(const eventOffsetMin of [-1,0.5,241])await assert.rejects(preview({...args,eventOffsetMin}),/Время события/);
   assert.equal((await preview({eventOffsetMin:45})).clock.status,'clock_unknown');
 });
+
+const scopeRow={edgeId:'r',operation:'patrol_plow',contractId:'demo',source:'Учебное приложение',clause:'1',reviewer:'А',
+  customer:'Учебный заказчик',executor:'Учебный исполнитель',officer:'Дежурный',from:'2026-11-20',until:'2026-11-21'};
+const scopePreview=(rows,extra={})=>preview({scenario:'attachment',attachment:{mode:'simulation',networkVersion:'unit',rows},...extra});
+test('address schedule matches exact edge, shift date and operation; orphan rows stay visible',async()=>{
+  const p=await scopePreview([scopeRow,{...scopeRow,edgeId:'unknown'}]);
+  assert.equal(p.mode,'simulation');assert.equal(p.mandate.status,'eligible');assert.equal(p.routing.assigned,true);
+  assert.equal(p.contract.document,scopeRow.source);assert.deepEqual(p.attachment.unmatched,[2]);
+  for(const row of [{...scopeRow,edgeId:'return'},{...scopeRow,from:'2026-11-21',until:'2026-11-22'},
+    {...scopeRow,from:'2026-11-01',until:'2026-11-20'},{...scopeRow,operation:'anti_icing'}]){
+    const q=await scopePreview([row]);assert.equal(q.routing,null);assert.equal(q.responsibility,null);
+  }
+});
+test('ambiguous scope blocks dispatch and a malformed dossier cannot start a route',async()=>{
+  const p=await scopePreview([scopeRow,{...scopeRow,contractId:'second'}]);
+  assert.equal(p.mandate.status,'blocked');assert.equal(p.routing,null);assert.deepEqual(p.actions,[]);
+  for(const row of [{...scopeRow,clause:''},{...scopeRow,from:'2026-02-30'}])await assert.rejects(scopePreview([row]));
+  for(const change of [{networkVersion:'other'},{mode:'verified'}])
+    await assert.rejects(scopePreview([],{attachment:{mode:'simulation',networkVersion:'unit',rows:[scopeRow],...change}}));
+});

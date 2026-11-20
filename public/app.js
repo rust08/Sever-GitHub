@@ -167,10 +167,10 @@ function syncOrderVehicles(){
   if(fleet.some(v=>v.id===previous))select.value=previous;
   $('order-offset').max=plan.input.shiftMin;
 }
-function downloadOrder(report){
+function downloadOrder(report,filename='sever-order-'+report.shift.date+'.json'){
   const blob=new Blob([JSON.stringify(report,null,2)],{type:'application/json;charset=utf-8'});
   const url=URL.createObjectURL(blob), link=document.createElement('a');
-  link.href=url;link.download='sever-order-'+report.shift.date+'.json';
+  link.href=url;link.download=filename;
   document.body.append(link);link.click();link.remove();
   setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
@@ -185,6 +185,11 @@ function openOrder(edgeId){
   if(plan)syncOrderVehicles();
   refreshOrder();box.scrollIntoView({block:'center'});
 }
+const sampleRow={edgeId:'w31172948-2001790818-2003931756',operation:'patrol_plow',customer:'Учебный заказчик',executor:'Учебная служба',officer:'Учебный диспетчер',
+  contractId:'DEMO-01',source:'Учебная адресная ведомость',clause:'Строка 1',reviewer:'Учебный проверяющий',from:'2026-01-01',until:'2027-01-01'};
+const sampleAttachment={mode:'simulation',networkVersion:'pkgo-27233df581c6',rows:[sampleRow,{...sampleRow,edgeId:'unmapped-demo',clause:'Строка 2'}]};
+$('attachment-save').onclick=()=>downloadOrder(sampleAttachment,'sever-training-scope.json');
+$('attachment-show').onclick=()=>{roadMap?.focus(sampleRow.edgeId);openOrder(sampleRow.edgeId);};
 async function refreshOrder(action){
   if(orderEdge==null || !plan)return;
   const revision=++orderRevision;
@@ -196,10 +201,26 @@ async function refreshOrder(action){
   }
   const body={vehicleId:vehicle.value,eventOffsetMin:offset.disabled?0:offset.valueAsNumber,shift:plan.input,shiftId:plan.id,edgeId:orderEdge,operation:$('order-operation').value,
     scenario:$('order-case').value,reverse:$('order-direction').value==='r',withEvent:$('order-event').checked};
+  $('attachment-controls').hidden=body.scenario!=='attachment';
+  if(body.scenario==='attachment'){
+    try{
+      const file=$('attachment-file').files[0];
+      if(file && file.size>64000)throw Error('Максимальный размер 64 КБ');
+      body.attachment=file?JSON.parse(await file.text()):sampleAttachment;
+      if(revision!==orderRevision)return;
+    }catch(error){if(revision===orderRevision)root.textContent='Проверьте JSON: '+error.message;return;}
+  }
   const parts=[data.network.version,plan.id,orderEdge,body.operation,body.scenario,body.reverse,body.withEvent];
   if(vehicle.selectedIndex>0 || body.eventOffsetMin)parts.push(body.vehicleId,body.eventOffsetMin);
-  const key='sever-governance-v1:'+JSON.stringify(parts);
+
   try{
+    if(body.attachment){
+      const bytes=new TextEncoder().encode(JSON.stringify(body.attachment));
+      const hash=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
+      parts.push(Array.from(hash,b=>b.toString(16).padStart(2,'0')).join(''));
+      if(revision!==orderRevision)return;
+    }
+    const key='sever-governance-v1:'+JSON.stringify(parts);
     const history=JSON.parse(localStorage.getItem(key)||'[]');
     if(action)history.push({...action,at:new Date().toISOString()});
     const result=await api('/api/orders/preview',{...body,history});
@@ -209,6 +230,10 @@ async function refreshOrder(action){
     add(root,'strong',{eligible:'Учебный допуск подтверждён',blocked:'Назначение заблокировано',manual_review:'Нужно ручное согласование'}[m.status]);
     add(root,'p','Ответственный: '+(result.responsibility?.officer||'не подтверждён')+' · исполнитель: '+(result.responsibility?.executor||'не подтверждён'));
     for(const reason of [...m.missing,...m.conflicts])add(root,'p',reason);
+    if(result.attachment){
+      add(root,'p','Совпавших строк: '+result.attachment.matchCount+'. Без геометрии: '+(result.attachment.unmatched.join(', ')||'нет')+'.');
+      if(result.contract)add(root,'p','Основание: '+result.contract.id+' · '+result.contract.document+' · '+result.contract.clause+' · проверил: '+result.contract.reviewer);
+    }
     const localTime=value=>new Date(value).toLocaleString('ru-RU',{timeZone:'Asia/Kamchatka'});
     if(result.contract)add(root,'p','Учебный договор действует до '+localTime(result.contract.end)+' (Камчатка), исключая этот момент.');
     if(result.event)add(root,'p','Снегопад закончился '+localTime(result.event.at)+' (учебное событие, Камчатка).');

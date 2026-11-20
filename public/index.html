@@ -43,7 +43,8 @@
         <summary><strong>Учебный наряд · основания и приёмка</strong></summary>
         <p>Выберите участок на карте и нажмите «Проверить учебный наряд». Досье и документы в примере вымышлены. Пробный маршрут рассчитывается отдельно от смены. Журнал сохраняется в этом браузере.</p>
         <p id="order-road"></p>
-        <label>Досье <select id="order-case"><option value="unknown">Документы отсутствуют</option><option value="example">Учебный договор на выбранный участок</option><option value="outside">Участок вне учебного договора</option><option value="expired">Договор истёк к началу смены</option></select></label>
+        <label>Досье <select id="order-case"><option value="unknown">Документы отсутствуют</option><option value="example">Учебный договор на выбранный участок</option><option value="outside">Участок вне учебного договора</option><option value="expired">Договор истёк к началу смены</option><option value="attachment">Строки учебного приложения</option></select></label>
+        <div id="attachment-controls" hidden><p>Пример содержит участок проспекта Победы и строку с неизвестной геометрией. Дата окончания исключается. Файл используется только в этой вкладке.</p><button type="button" id="attachment-show">Показать участок примера</button> <button type="button" id="attachment-save">Скачать пример JSON</button><label>Открыть своё учебное приложение (JSON)<input type="file" accept=".json" id="attachment-file"></label></div>
         <label>Машина из смены <select id="order-vehicle"></select></label>
         <label>Операция <select id="order-operation"></select></label>
         <label>Направление <select id="order-direction"></select></label>
