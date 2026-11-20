@@ -1,3 +1,4 @@
+import {resourceReason,checkWorksite} from './equipment.mjs';
 import {assessMandate,trainingClock,workTypes,recordStep,workflow} from './governance.mjs';
 import {passesForEdge} from './policy.mjs';
 import {plan} from './planner.mjs';
@@ -55,9 +56,17 @@ export function previewOrder(data,input,request) {
       resource.executor=row.executor;
     }
   }
+  if(resource)resource.operations=machine.operations??operations;
   const mandate=assessMandate({asset,resource,contract,responsibility,operation,at});
+  const worksite=request.worksite??{};
+  const limits=checkWorksite(machine,worksite);
+  const reason=resourceReason(machine,input,operation);
+  if(reason)mandate.conflicts.push(reason);
+  mandate.missing.push(...limits.missing);mandate.conflicts.push(...limits.conflicts);
+  if(mandate.conflicts.length)mandate.status='blocked';
+  else if(mandate.missing.length)mandate.status='manual_review';
   if(attachment && attachment.matchCount!==1){
-    mandate.status=attachment.matchCount?'blocked':'manual_review';
+    mandate.status=attachment.matchCount || mandate.conflicts.length?'blocked':'manual_review';
     (attachment.matchCount?mandate.conflicts:mandate.missing).push(attachment.matchCount?'Несколько действующих строк на один участок и операцию':'Нет строки на выбранный участок, операцию и дату');
   }
   const {objectType='roadway',queue=1,eventKind='snowfall_end',repeatOffsetMin}=request;
@@ -88,6 +97,7 @@ export function previewOrder(data,input,request) {
   if(machine.id!==vehicles[0].id || offset)identity.push(machine.id,offset);
   if(attachment?.matchCount===1)identity.push(contract,responsibility.officer);
   if(objectType!=='roadway' || queue!==1 || eventKind!=='snowfall_end' || repeatOffsetMin!=null)identity.push(objectType,queue,eventKind,repeatOffsetMin??null);
+  if(Object.keys(worksite).length)identity.push(worksite);
   const id=JSON.stringify(identity);
   const order={id,dispatchable:routing?.assigned===true};
   let history=[];
@@ -96,6 +106,6 @@ export function previewOrder(data,input,request) {
   const state=history.at(-1)?.state??'planned';
   const actions=order.dispatchable?Object.entries(workflow[state]).map(([state,role])=>({state,role})):[];
   return {mode:'simulation',id,state,history,actions,mandate,clock,routing,asset,responsibility:attachment && attachment.matchCount!==1?null:responsibility,
-    contract:attachment && attachment.matchCount!==1?null:contract,operation,resource:attachment && attachment.matchCount!==1?null:resource,rule,event,episodes,attachment};
+    contract:attachment && attachment.matchCount!==1?null:contract,operation,resource:attachment && attachment.matchCount!==1?null:resource,rule,event,episodes,attachment,worksite};
 }
 

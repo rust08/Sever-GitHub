@@ -1,3 +1,4 @@
+import {equipmentFields,resourceReason} from './equipment.mjs';
 import {previewOrder} from './order-preview.mjs';
 import {workTypes} from './governance.mjs';
 import {policy, passesForEdge, fleetSeed, makePasses} from './policy.mjs';
@@ -22,7 +23,8 @@ function validateFleet(fleet) {
     ensure(bounded(rate,1000000) && rate >= 0.01,'Проверьте тариф машины');
     ensure(bounded(workKmh,200) && bounded(driveKmh,200),'Задайте скорости расчистки и переезда от 0 до 200 км/ч, исключая ноль');
     ids.add(id);
-    return {id,name:name.trim(),type:type.trim(),rate,workKmh,driveKmh};
+    let equipment;try{equipment=equipmentFields(vehicle);}catch(e){throw new InputError(e.message);}
+    return {...equipment,id,name:name.trim(),type:type.trim(),rate,workKmh,driveKmh};
   });
 }
 function confirmedPasses(ids, edges) {
@@ -94,7 +96,14 @@ export function calculateShift(data,body) {
   for (const pass of confirmed) required.set(pass.id, pass);
   const tasks = [...required.values()];
   const fleet=(input.fleet??data.fleet).map(v=>({...v,rate:Object.hasOwn(input.rates,v.id)?input.rates[v.id]:v.rate}));
-  const result=plan(data.network,tasks,fleet,input);
+  const excludedVehicles=[];
+  const eligible=fleet.filter(v=>{
+    const reason=resourceReason(v,input,'patrol_plow');
+    if(reason && input.vehicleIds.includes(v.id))excludedVehicles.push({id:v.id,name:v.name,reason});
+    return !reason;
+  });
+  const result=plan(data.network,tasks,eligible,input);
+  result.excludedVehicles=excludedVehicles;
   result.priorities=confirmed;
   const id=crypto.randomUUID();
   return {id,input,result};

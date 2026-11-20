@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#101d24">
   <title>Север · Диспетчерская расчистки</title>
   <link rel="stylesheet" href="/vendor/leaflet.css"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/map.css"><script src="/vendor/leaflet.js" defer></script>
+  <script src="/equipment-evidence.js" defer></script>
   <script src="/app.js" type="module"></script>
 </head>
 <body>
@@ -39,6 +40,10 @@
         </section>
       </div>
       
+      <details class="panel page" id="fleet-evidence"><summary>Свидетельства о технике и ресурсах</summary>
+        <p>Публикации из исследования от 20 ноября 2026 года. Доступность конкретной машины задаётся в карточке смены.</p>
+        <label>Сообщение <select id="equipment-observation"></select></label><div id="equipment-source"></div>
+      </details>
       <details class="panel page" id="registry-panel" hidden>
         <summary>Реестр ответственности · документы и редакции</summary>
         <p>Выберите сохранённую редакцию для просмотра или создайте первую. Каждое сохранение добавляет редакцию. Документы на проверке требуют решения уполномоченного лица.</p>
@@ -72,6 +77,12 @@
         <label>Событие <select id="clock-kind"><option value="snowfall_end">Окончание снегопада</option><option value="ice_detected">Обнаружение скользкости</option></select></label>
         <label>Через сколько минут после начала смены произошло событие <input type="number" id="order-offset" min="0" step="1" value="0" disabled></label>
         <label>Повторное событие того же вида, минут от начала смены (необязательно) <input type="number" min="1" step="1" id="clock-repeat" disabled></label>
+        <details><summary>Ограничения на месте работы · учебная проверка</summary>
+          <p>Заполняйте известные ограничения. Проверка относится к выбранному участку. Для пути до него нужны отдельные данные.</p>
+          <label>Свободная ширина прохода, м <input type="number" min="0.01" step="any" id="limit-width"></label>
+          <label>Допустимая масса, т <input type="number" min="0.01" step="any" id="limit-mass"></label>
+          <label>Уклон участка, % <input type="number" min="0" step="any" id="limit-grade"></label>
+        </details>
         <div id="order-output" aria-live="polite"></div>
       </details>
       <section class="panel detail-panel" id="shift-details">

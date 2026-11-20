@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {api,createCatalog} from './service.mjs';
+import {api,createCatalog,calculateShift} from './service.mjs';
 import {assessMandate,assessClock} from './governance.mjs';
 
 const data=createCatalog({scope:'city',version:'unit',depot:'d',nodes:{d:[0,0],b:[1,0]},
@@ -122,4 +122,25 @@ test('clock requires the right source event, passport, queue and effective editi
   assert.equal((await preview({...ice,queue:2})).clock.status,'needs_review');
   assert.equal((await preview({operation:'sidewalk',queue:2,objectType:'sidewalk',withEvent:true})).rule.minutes,240);
   assert.equal((await preview({...ice,shift:{...shift,date:'2028-01-01'}})).clock.status,'needs_review');
+});
+
+test('shift resource filters, full availability interval and worksite safety use the same saved card',async()=>{
+  const machine={...data.fleet[0],type:'Учебная КДМ',availability:'reported',availabilitySource:'Журнал А',
+    availableFrom:'2026-11-20T08:00',availableUntil:'2026-11-20T12:00',operations:['patrol_plow'],widthM:3,massT:10,maxGradePct:8};
+  const withMachine=v=>({...shift,fleet:[v],vehicleIds:[v.id]});
+  const good=withMachine(machine);
+  assert.ok(calculateShift(data,good).result.summary.assigned>0);
+  const ok=await preview({shift:good,worksite:{clearWidthM:3,maxMassT:10,gradePct:8}});
+  assert.ok(ok.routing.assigned);
+  for(const change of [{availableUntil:'2026-11-20T11:59'},{operations:['snow_haul']},{availability:'unknown'},{availability:'unavailable'}]){
+    const input=withMachine({...machine,...change});
+    const result=calculateShift(data,input).result;
+    assert.equal(result.summary.assigned,0);assert.equal(result.excludedVehicles.length,1);
+    assert.equal((await preview({shift:input})).routing,null);
+  }
+  for(const worksite of [{clearWidthM:2.9},{maxMassT:9},{gradePct:9}]){
+    const p=await preview({shift:good,worksite});assert.equal(p.routing,null);assert.equal(p.mandate.status,'blocked');
+  }
+  assert.equal((await preview({shift:withMachine({...machine,widthM:null}),worksite:{clearWidthM:3}})).mandate.status,'manual_review');
+  assert.throws(()=>calculateShift(data,withMachine({...machine,availabilitySource:''})));
 });

@@ -68,6 +68,25 @@ function addVehicle(vehicle, active, open=false) {
       caption.textContent=field.value||'Машина';enabled.setAttribute('aria-label','Включить в смену: '+caption.textContent);
     };
   }
+  const availability=add(add(fields,'label','Доступность в смене'),'select');
+  availability.dataset.field='availability';
+  for(const [value,title] of Object.entries({demo:'Учебное допущение',reported:'Указана диспетчером на период',unknown:'Неизвестна',unavailable:'Недоступна'}))availability.add(new Option(title,value));
+  availability.value=vehicle.availability??'demo';
+  const windowFields=add(fields,'div');
+  for(const [key,title] of Object.entries({availableFrom:'Доступна с (Камчатка)',availableUntil:'Доступна до (Камчатка)',availabilitySource:'Основание доступности'})){
+    const input=add(add(windowFields,'label',title),'input');
+    input.type=key==='availabilitySource'?'text':'datetime-local';input.dataset.field=key;input.value=vehicle[key]??'';
+  }
+  function updateWindow(){windowFields.hidden=availability.value!=='reported';for(const el of windowFields.querySelectorAll('input'))el.required=!windowFields.hidden;}
+  availability.onchange=updateWindow;updateWindow();
+  const ops=add(fields,'details');add(ops,'summary','Виды работ машины');
+  for(const [key,title] of Object.entries(data.workTypes)){
+    const label=add(ops,'label');const box=add(label,'input');box.type='checkbox';box.dataset.operation=key;
+    box.checked=(vehicle.operations??['patrol_plow']).includes(key);label.append(document.createTextNode(title));
+  }
+  for(const [key,title] of Object.entries({widthM:'Ширина с оборудованием, м',massT:'Рабочая масса, т',maxGradePct:'Допустимый уклон, %'})){
+    const el=add(add(fields,'label',title),'input');el.dataset.field=key;el.type='number';el.step='any';el.min=key==='maxGradePct'?'0':'0.01';el.value=vehicle[key]??'';
+  }
   const remove=add(editor,'button','Удалить из парка','row-button');remove.type='button';
   remove.onclick=()=>{row.remove();markChanged();$('add-vehicle').focus();};
   return row;
@@ -175,6 +194,7 @@ function downloadOrder(report,filename='sever-order-'+report.shift.date+'.json')
   setTimeout(()=>URL.revokeObjectURL(url),1000);
 }
 function openOrder(edgeId){
+  if(orderEdge!==edgeId)for(const id of ['limit-width','limit-mass','limit-grade'])$(id).value='';
   orderEdge=edgeId;
   const box=$('order-panel');box.open=true;
   $('order-operation').replaceChildren(...Object.entries(data.workTypes).map(([value,title])=>new Option(title,value)));
@@ -208,6 +228,11 @@ async function refreshOrder(action){
     scenario:$('order-case').value,reverse:$('order-direction').value==='r',withEvent:$('order-event').checked};
   Object.assign(body,{objectType:$('clock-object').value,queue:Number($('clock-queue').value),
     eventKind:offset.disabled?'snowfall_end':$('clock-kind').value,repeatOffsetMin:!repeat.disabled && repeat.value!==''?repeat.valueAsNumber:null});
+  body.worksite={};
+  for(const [key,id] of Object.entries({clearWidthM:'limit-width',maxMassT:'limit-mass',gradePct:'limit-grade'})){
+    const el=$(id);if(!el.checkValidity()){root.textContent='Проверьте ограничения выбранного участка.';return;}
+    if(el.value!=='')body.worksite[key]=el.valueAsNumber;
+  }
   $('attachment-controls').hidden=body.scenario!=='attachment';
   if(body.scenario==='attachment'){
     try{
@@ -220,6 +245,7 @@ async function refreshOrder(action){
   const parts=[data.network.version,plan.id,orderEdge,body.operation,body.scenario,body.reverse,body.withEvent];
   if(body.objectType!=='roadway' || body.queue!==1 || body.eventKind!=='snowfall_end' || body.repeatOffsetMin!==null)
     parts.push(body.objectType,body.queue,body.eventKind,body.repeatOffsetMin);
+  if(Object.keys(body.worksite).length)parts.push(body.worksite);
   if(vehicle.selectedIndex>0 || body.eventOffsetMin)parts.push(body.vehicleId,body.eventOffsetMin);
 
   try{
@@ -307,10 +333,10 @@ function showRoad(id) {
   btn.type='button';btn.disabled=saving;btn.onclick=()=>toggleEntry(false,key);
 }
 function readInput() {
-  const checked = id => [...$(id).querySelectorAll('input[type=checkbox]:checked')].map(el => el.value);
+  const checked = id => [...$(id).querySelectorAll('input[type=checkbox]:checked:not([data-operation])')].map(el => el.value);
   const fleet=[...$('fleet').children].map(row=>{
-    const vehicle={id:row.dataset.id};
-    for(const el of row.querySelectorAll('[data-field]'))vehicle[el.dataset.field]=el.type==='number'?el.valueAsNumber:el.value.trim();
+    const vehicle={id:row.dataset.id,operations:[...row.querySelectorAll('[data-operation]:checked')].map(box=>box.dataset.operation)};
+    for(const el of row.querySelectorAll('[data-field]'))vehicle[el.dataset.field]=el.type==='number'?(el.value===''?null:el.valueAsNumber):el.value.trim();
     return vehicle;
   });
   const rates=Object.fromEntries(fleet.map(v=>[v.id,v.rate]));
@@ -394,6 +420,7 @@ function selectLeg(route, leg) {
 function drawRoutes() {
   const root = $('routes'); root.replaceChildren();
   add(root,'p','Местное время. Выберите этап, чтобы увидеть участок и машину на карте.','sub');
+  for(const v of plan.result.excludedVehicles??[])add(root,'p',v.name+' · исключена из расчистки: '+v.reason);
   for (const [i,route] of plan.result.routes.entries()) {
     if ($('filter').value && String(route.vehicleId) !== $('filter').value) continue;
     const sheet = add(root,'details',null,'sheet'); sheet.open = i === 0 || Boolean($('filter').value);
@@ -644,3 +671,37 @@ function initCoverage(){
   for(const element of [day,operation,source,time])element.onchange=()=>refresh(roadMap.mode);
   roadMap.onModeChange=refresh;
 }
+
+function initEquipmentObservations(){
+  const {facts,sources}=window.equipmentEvidence;
+  const titles={reported_ready_vehicles:'Заявленная готовность техники',reported_snow_storage_sites:'Подготовка снежных площадок',
+    prior_snow_storage_sites:'Площадки в предыдущем сравнении',new_machines_delivered_by_2026_09_25:'Прибытие партии машин',
+    new_machines_reported_purchased:'Сообщение о закупке',winter_preparation_inspected:'Проверка подготовки к зиме',
+    mechanics_reported_prepared:'Подготовка механиков',special_vehicles_for_emergency_table:'Спецмашины в таблице сил ЧС',
+    loaders_for_emergency_table:'Погрузчики в таблице сил ЧС',excavators_for_emergency_table:'Экскаваторы в таблице сил ЧС',
+    emergency_staff_reported:'Численность формирования',vehicles_working_night:'Выход техники в ночную смену',
+    reported_new_categories:'Сообщение о типах новой техники',kamaz_combined_road_machines_reported:'Сообщение о КДМ КамАЗ',
+    compact_street_vacuum_sweepers_reported:'Вакуумные подметальные машины',tires_blades_salt_mix_spares_checked:'Проверка запасов',
+    blizzard_parking_prepared:'Подготовка стоянки',heavy_tow_truck_duty_requested:'Запрос дежурства тягачей',
+    vehicle_towing_near_schools_prioritized:'Эвакуация машин у школ',mechanical_brush_and_pgm_used:'Щётки и обработка покрытия',
+    snowbank_blower_and_drain_clearance_used:'Разбор валов и водоотвод',verified_per_vehicle_ids:'Идентифицированные машины в исследовании'};
+  const select=$('equipment-observation'),out=$('equipment-source');
+  for(const fact of facts)select.add(new Option(fact.observed_date+' · '+titles[fact.field]+' · '+fact.id,fact.id));
+  function show(){
+    const fact=facts[select.selectedIndex],source=sources[fact.source_id];
+    out.replaceChildren();add(out,'strong',titles[fact.field]);
+    if(typeof fact.value==='number'){
+      const prefix={greater_than:'Более ',approximately:'Около '}[fact.qualifier]??'';
+      add(out,'p',prefix+fact.value+' '+({pieces:'ед.',people:'чел.',sites:'площ.',records:'зап.'}[fact.unit]??fact.unit));
+    }
+    if(Array.isArray(fact.value)){
+      const types={grader:'грейдер',combined_road_machine:'комбинированная дорожная машина',snowblower:'снегоочиститель',front_loader:'фронтальный погрузчик',general_purpose_vehicle:'машина общего назначения'};
+      add(out,'p',fact.value.map(v=>types[v]??v).join(', '));
+    }
+    add(out,'p',fact.observed_date+' · '+(fact.scope==='citywide'?'город в целом':fact.entity_id));
+    add(out,'p',fact.comment);
+    const link=add(out,'a',source.title);link.href=source.url;link.target='_blank';link.rel='noreferrer';
+  }
+  select.onchange=show;show();
+}
+initEquipmentObservations();
