@@ -230,6 +230,20 @@ function cityPath(previous, node, reverse) {
   return reverse ? path : path.reverse();
 }
 
+export function haulRoadPaths(network,closed,loadNode,siteNode){
+  if(typeof loadNode!=='string' || typeof siteNode!=='string' || !Object.hasOwn(network.nodes,loadNode) || !Object.hasOwn(network.nodes,siteNode))
+    throw Error('Выберите обе точки на городской карте');
+  if(loadNode===siteNode)throw Error('Укажите разные дорожные узлы погрузки и приёма');
+  const {outgoing}=cityGraph(network,new Set(closed.map(String)));
+  function direction(start,end){
+    const tree=shortestTree(outgoing,start,false,node=>node!==end);
+    if(!tree.distances.has(end))return null;
+    const km=tree.distances.get(end),edges=cityPath(tree.previous,end,false).map(arc=>arc.edge.id);
+    return {km,edges};
+  }
+  return {loadNode,siteNode,outward:direction(loadNode,siteNode),home:direction(siteNode,loadNode)};
+}
+
 function cityLeg(route, arc, task) {
   const start = route.elapsed;
   const seconds = travelSeconds(arc.edge.km, task ? route.vehicle.workKmh : route.vehicle.driveKmh);

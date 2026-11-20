@@ -1,3 +1,4 @@
+import {registryResponse} from './backend/registry.mjs';
 import {DatabaseSync} from 'node:sqlite';
 import {createServer} from 'node:http';
 import {spawn} from 'node:child_process';
@@ -38,10 +39,17 @@ function openBrowser(){spawn('rundll32.exe',['url.dll,FileProtocolHandler',addre
 const server=createServer(async(req,res)=>{
   try {
     if(req.url==='/api/version'){res.writeHead(200,{'Content-Type':'text/plain','Cache-Control':'no-store'});return res.end('sever-city-dark-1')}
+    const registry=req.url.split('?')[0].startsWith('/api/registry');
+    if(registry){
+      const host=req.headers.host??'';
+      if(!/^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host) || (req.headers.origin && req.headers.origin!=='http://'+host)){
+        res.writeHead(403);return res.end();
+      }
+    }
     const chunks=[]; let bytes=0;
-    for await (const chunk of req) {bytes+=chunk.length;if(bytes>2*1024*1024){res.writeHead(413);return res.end()} chunks.push(chunk)}
+    for await (const chunk of req) {bytes+=chunk.length;if(bytes>(registry?18:2)*1024*1024){res.writeHead(413);return res.end()} chunks.push(chunk)}
     const request=new Request(new URL(req.url,'http://127.0.0.1'),{method:req.method,headers:req.headers,body:chunks.length?Buffer.concat(chunks):undefined});
-    const response=await handle(request,db,asset,data);
+    const response=registry?await registryResponse(request,sqlite,data.network):await handle(request,db,asset,data);
     res.writeHead(response.status,Object.fromEntries(response.headers));
     res.end(Buffer.from(await response.arrayBuffer()));
   } catch(e) {console.error(e);res.writeHead(500);res.end()}

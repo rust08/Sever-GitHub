@@ -37,6 +37,7 @@ export function assessMandate({asset,responsibility,contract,resource,operation,
 
 export function assessClock({asset,operation,rule,event}) {
   if(!documented(asset) || !documented(rule) || !rule.clockStart || !rule.territory || !rule.version || !rule.clause || !asset?.legalClass || asset.legalClass!==rule.legalClass ||
+    (rule.objectType && rule.objectType!==asset.objectType) || (rule.queue && rule.queue!==asset.queue) ||
     asset.territory!==rule.territory || rule.operation!==operation || !(rule.minutes>0) || !Number.isFinite(rule.minutes))
     return {status:'needs_review'};
   if(!documented(event) || !event.id || !dated(event.at) || event.kind!==rule.clockStart || event.assetId!==asset.id)
@@ -63,3 +64,29 @@ export function recordStep(order,history,entry) {
   return [...history,{...entry}];
 }
 
+
+// Synthetic training catalogue. All boundaries use Kamchatka local time.
+const trainingPeriods=[
+  ['учебная-1','2026-01-01','2026-12-01'],
+  ['учебная-2','2026-12-01','2028-01-01']
+];
+const trainingStandards=[
+  ['roadway',1,'patrol_plow','snowfall_end','А',[120,90]],
+  ['roadway',2,'patrol_plow','snowfall_end','Б',[180,150]],
+  ['roadway',1,'anti_icing','ice_detected','В',[60,45]],
+  ['roadway',1,'snow_haul','snowfall_end','Г',[480,420]],
+  ['sidewalk',2,'sidewalk','snowfall_end','Д',[240,210]]
+];
+export function trainingClock(asset,operation,event,referenceTime){
+  const instant=event?.at??referenceTime;
+  const spec=trainingStandards.find(([object,queue,work])=>object===asset.objectType && queue===asset.queue && work===operation);
+  const index=trainingPeriods.findIndex(([,from,until])=>Date.parse(from+'T00:00:00+12:00')<=Date.parse(instant) && Date.parse(instant)<Date.parse(until+'T00:00:00+12:00'));
+  let rule=null;
+  if(spec && index>=0 && documented(asset)){
+    const [version,from,until]=trainingPeriods[index];
+    rule={status:'checked',document:'Учебный каталог сроков',version,clause:'Образец, пункт '+spec[4],territory:'demo',
+      legalClass:'учебная группа',objectType:spec[0],queue:spec[1],operation,clockStart:spec[3],minutes:spec[5][index],
+      start:from+'T00:00:00+12:00',end:until+'T00:00:00+12:00'};
+  }
+  return {rule,event,clock:assessClock({asset,operation,rule,event})};
+}

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {api,createCatalog} from './service.mjs';
+import {api,createCatalog,calculateShift} from './service.mjs';
 import {assessMandate,assessClock} from './governance.mjs';
 
 const data=createCatalog({scope:'city',version:'unit',depot:'d',nodes:{d:[0,0],b:[1,0]},
@@ -85,4 +85,62 @@ test('event time moves the illustrative deadline across local midnight',async()=
   assert.notEqual(p.id,(await preview(args)).id);
   for(const eventOffsetMin of [-1,0.5,241])await assert.rejects(preview({...args,eventOffsetMin}),/Время события/);
   assert.equal((await preview({eventOffsetMin:45})).clock.status,'clock_unknown');
+});
+
+const scopeRow={edgeId:'r',operation:'patrol_plow',contractId:'demo',source:'Учебное приложение',clause:'1',reviewer:'А',
+  customer:'Учебный заказчик',executor:'Учебный исполнитель',officer:'Дежурный',from:'2026-11-20',until:'2026-11-21'};
+const scopePreview=(rows,extra={})=>preview({scenario:'attachment',attachment:{mode:'simulation',networkVersion:'unit',rows},...extra});
+test('address schedule matches exact edge, shift date and operation; orphan rows stay visible',async()=>{
+  const p=await scopePreview([scopeRow,{...scopeRow,edgeId:'unknown'}]);
+  assert.equal(p.mode,'simulation');assert.equal(p.mandate.status,'eligible');assert.equal(p.routing.assigned,true);
+  assert.equal(p.contract.document,scopeRow.source);assert.deepEqual(p.attachment.unmatched,[2]);
+  for(const row of [{...scopeRow,edgeId:'return'},{...scopeRow,from:'2026-11-21',until:'2026-11-22'},
+    {...scopeRow,from:'2026-11-01',until:'2026-11-20'},{...scopeRow,operation:'anti_icing'}]){
+    const q=await scopePreview([row]);assert.equal(q.routing,null);assert.equal(q.responsibility,null);
+  }
+});
+test('ambiguous scope blocks dispatch and a malformed dossier cannot start a route',async()=>{
+  const p=await scopePreview([scopeRow,{...scopeRow,contractId:'second'}]);
+  assert.equal(p.mandate.status,'blocked');assert.equal(p.routing,null);assert.deepEqual(p.actions,[]);
+  for(const row of [{...scopeRow,clause:''},{...scopeRow,from:'2026-02-30'}])await assert.rejects(scopePreview([row]));
+  for(const change of [{networkVersion:'other'},{mode:'verified'}])
+    await assert.rejects(scopePreview([],{attachment:{mode:'simulation',networkVersion:'unit',rows:[scopeRow],...change}}));
+});
+
+test('two episodes select their own rule across the Kamchatka revision boundary',async()=>{
+  const p=await preview({shift:{...shift,date:'2026-11-30',start:'23:50'},withEvent:true,repeatOffsetMin:10});
+  assert.deepEqual(p.episodes.map(e=>e.rule.minutes),[120,90]);
+  assert.deepEqual(p.episodes.map(e=>e.clock.dueAt),['2026-11-30T13:50:00.000Z','2026-11-30T13:30:00.000Z']);
+  assert.notEqual(p.episodes[0].event.id,p.episodes[1].event.id);
+  await assert.rejects(preview({withEvent:true,eventOffsetMin:15,repeatOffsetMin:15}));
+  await assert.rejects(preview({repeatOffsetMin:5}));
+});
+test('clock requires the right source event, passport, queue and effective edition',async()=>{
+  const ice={operation:'anti_icing',eventKind:'ice_detected',withEvent:true};
+  const p=await preview(ice);assert.equal(p.rule.minutes,60);assert.ok(p.clock.dueAt);assert.equal(p.routing,null);
+  assert.equal((await preview({...ice,eventKind:'snowfall_end'})).clock.status,'clock_unknown');
+  assert.equal((await preview({...ice,queue:2})).clock.status,'needs_review');
+  assert.equal((await preview({operation:'sidewalk',queue:2,objectType:'sidewalk',withEvent:true})).rule.minutes,240);
+  assert.equal((await preview({...ice,shift:{...shift,date:'2028-01-01'}})).clock.status,'needs_review');
+});
+
+test('shift resource filters, full availability interval and worksite safety use the same saved card',async()=>{
+  const machine={...data.fleet[0],type:'Учебная КДМ',availability:'reported',availabilitySource:'Журнал А',
+    availableFrom:'2026-11-20T08:00',availableUntil:'2026-11-20T12:00',operations:['patrol_plow'],widthM:3,massT:10,maxGradePct:8};
+  const withMachine=v=>({...shift,fleet:[v],vehicleIds:[v.id]});
+  const good=withMachine(machine);
+  assert.ok(calculateShift(data,good).result.summary.assigned>0);
+  const ok=await preview({shift:good,worksite:{clearWidthM:3,maxMassT:10,gradePct:8}});
+  assert.ok(ok.routing.assigned);
+  for(const change of [{availableUntil:'2026-11-20T11:59'},{operations:['snow_haul']},{availability:'unknown'},{availability:'unavailable'}]){
+    const input=withMachine({...machine,...change});
+    const result=calculateShift(data,input).result;
+    assert.equal(result.summary.assigned,0);assert.equal(result.excludedVehicles.length,1);
+    assert.equal((await preview({shift:input})).routing,null);
+  }
+  for(const worksite of [{clearWidthM:2.9},{maxMassT:9},{gradePct:9}]){
+    const p=await preview({shift:good,worksite});assert.equal(p.routing,null);assert.equal(p.mandate.status,'blocked');
+  }
+  assert.equal((await preview({shift:withMachine({...machine,widthM:null}),worksite:{clearWidthM:3}})).mandate.status,'manual_review');
+  assert.throws(()=>calculateShift(data,withMachine({...machine,availabilitySource:''})));
 });

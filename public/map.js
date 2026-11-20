@@ -1,3 +1,4 @@
+import {territoryPilot} from './territory-pilot.js';
 import {cityContext} from './city-context.js';
 // Leaflet owns the projection, panning, zoom, clipping and canvas hit testing.
 const L = window.L;
@@ -5,6 +6,7 @@ const COLORS = {none:'#99a6a8', p1:'#bd2650', p2:'#a55108', p3:'#2a668e', p4:'#6
   pending:'#547394', active:'#005faa', partial:'#896422', done:'#22784a', missed:'#ab4455'};
 const swatch = (color, weight, dashArray = null) => ({color, weight, dashArray, opacity:1});
 const STYLES = {
+  single:swatch('#286faf',5),overlap:swatch('#ae3062',6),
   none:swatch(COLORS.none,1), p1:swatch(COLORS.p1,5), p2:swatch(COLORS.p2,3.8),
   p3:swatch(COLORS.p3,2.5), p4:swatch(COLORS.p4,1.4), pending:swatch(COLORS.pending,2.5),
   active:swatch(COLORS.active,6), partial:swatch(COLORS.partial,3.5), done:swatch(COLORS.done,3.5),
@@ -88,14 +90,19 @@ export class RoadMap {
     this.map.setMaxBounds(L.latLngBounds(reliefBounds));
     L.imageOverlay('/terrain-map.webp',reliefBounds,{pane:'tilePane',interactive:false,alt:'Рельеф Авачинской губы'}).addTo(this.map);
     addStreetDetail(this.map);
+    this.cityRoads=L.layerGroup().addTo(this.map);
     this.bounds=L.latLngBounds();
     for(const edge of network.edges) {
       const geometry=edge.geometry?.coordinates || edge.geometry;
       const coords=geometry?.length>1?geometry:[network.nodes[edge.from],network.nodes[edge.to]];
       const points=coords.map(([lon,lat])=>L.latLng(lat,lon));
       const id=String(edge.id);
-      const line=L.polyline(points,{...STYLES.none,bubblingMouseEvents:false}).addTo(this.map);
-      line.on('click',()=>this.highlight(id));
+      const line=L.polyline(points,{...STYLES.none,bubblingMouseEvents:false}).addTo(this.cityRoads);
+      line.on('click',event=>{
+        if(!this.onHaulPick){this.highlight(id);return;}
+        const node=event.latlng.distanceTo(points[0])<=event.latlng.distanceTo(points.at(-1))?edge.from:edge.to;
+        this.onHaulPick(String(node),edge.name||'Без названия',id);
+      });
       this.bounds.extend(line.getBounds());
       const taskList=this.edgeTasks.get(id) || [];
       const priority=taskList.reduce((p,t)=>Math.min(t.priority,p),5);
@@ -104,6 +111,7 @@ export class RoadMap {
     this.map.createPane('routeLayer').style.zIndex='420';
     this.map.getPane('routeLayer').style.pointerEvents='none';
     this.routeRenderer=L.canvas({pane:'routeLayer'});
+    this.haulLayers=L.layerGroup().addTo(this.map);
     this.routeLayers=L.layerGroup().addTo(this.map);
     this.markers=L.layerGroup().addTo(this.map);
     this.depot=L.latLng([...network.nodes[network.depot]].reverse());
@@ -111,15 +119,73 @@ export class RoadMap {
       interactive:false,keyboard:false,title:'База'}).addTo(this.map);
     this.map.on('click',()=>this.highlight(null));
     document.querySelector('#map-mode').addEventListener('change',e=>{
-      this.mode=e.target.value; this.legend();this.paint(true);
+      this.setMode(e.target.value);
     });
     this.observer=new ResizeObserver(()=>this.map.invalidateSize({pan:false}));
     this.observer.observe(container);
     this.map.setView([53.035,158.654],12.75);this.legend();this.paint(true);
   }
+  setMode(mode) {
+    if(this.mode===mode)return;
+    this.highlight(null);
+    this.onHaulPick=null;this.haulLayers.clearLayers();
+    this.mode=mode;
+    if(mode==='territory'){
+      this.previousView={center:this.map.getCenter(),zoom:this.map.getZoom()};
+      this.cityRoads.remove();
+      this.markers.remove();
+      if(!this.pilot){
+        this.pilot=L.featureGroup();
+        for(const [id,name,way,coordinates] of territoryPilot.roads){
+          const points=coordinates.map(([longitude,latitude])=>[latitude,longitude]);
+          const line=L.polyline(points,{color:'#59646c',weight:5,bubblingMouseEvents:false}).addTo(this.pilot);
+          line.pilotId=id;
+          line.bindPopup(()=>{
+            const card=document.createElement('div');
+            const title=document.createElement('strong');
+            title.textContent=name || 'Участок без названия';
+            const details=document.createElement('p');
+            details.textContent='Расчистка · '+territoryPilot.date+' · исполнитель не подтверждён. Участок '+id+' · OSM way '+way;
+            card.append(title,details);
+            if(this.showPilotHints)for(const [date,operation,operator,url] of territoryPilot.hints[id]??[]){
+              const hint=document.createElement('p');
+              hint.textContent=date+' · '+operator+' · '+operation+' · совпало название улицы. Граница работ не подтверждена. ';
+              const source=document.createElement('a');source.href=url;source.target='_blank';source.rel='noreferrer';source.textContent='Историческое сообщение';
+              hint.append(source);card.append(hint);
+            }
+            return card;
+          });
+        }
+      }
+      this.pilot.addTo(this.map);
+      this.map.fitBounds(this.pilot.getBounds(),{padding:[16,16],animate:false});
+    }else if(this.previousView){
+      this.map.closePopup();
+      this.pilot.remove();
+      this.cityRoads.addTo(this.map);
+      this.markers.addTo(this.map);
+      this.map.setView(this.previousView.center,this.previousView.zoom,{animate:false});
+      this.previousView=null;
+    }
+    document.getElementById('map-mode').value=mode;
+    this.legend();this.paint(true);
+    this.onModeChange?.(mode);
+  }
   legend() {
     const root=document.getElementById('map-legend');
     root.replaceChildren();
+    if(this.mode==='territory'){
+      root.textContent='Пилот · '+territoryPilot.date+' · расчистка. Для всех '+territoryPilot.roads.length+' участков исполнитель не подтверждён. Нажмите на дорогу для просмотра.';
+      const label=document.createElement('label'),toggle=document.createElement('input');
+      toggle.type='checkbox';toggle.checked=Boolean(this.showPilotHints);
+      toggle.onchange=()=>{
+        this.showPilotHints=toggle.checked;this.map.closePopup();
+        this.pilot.eachLayer(line=>line.setStyle({color:toggle.checked && territoryPilot.hints[line.pilotId]?'#7840a0':'#59646c'}));
+      };
+      label.append(toggle,document.createTextNode('Фиолетовый — историческое упоминание улицы'));root.append(label);
+      return;
+    }
+    if(this.mode==='coverage'){root.textContent='Серый — без строки · синий — одна строка · малиновый — пересечение строк';return;}
     for(const [key,label] of [...labels[this.mode],['closed','Перекрыто'],['draft','Изменение перекрытия'],['base','База']]) {
       const row=document.createElement('span'), mark=document.createElement('i');
       if(key==='base') mark.textContent='◆';
@@ -131,11 +197,24 @@ export class RoadMap {
     }
   }
   focus(id) {
+    if(this.mode==='territory')this.setMode('priority');
     const path=this.paths.get(String(id));if(!path)return;
     this.map.fitBounds(path.line.getBounds(),{maxZoom:17,padding:[48,48],animate:false});
     this.highlight(String(id));
   }
   fit(){this.map.fitBounds(this.bounds,{padding:[16,16],animate:false});this.highlight(null);}
+  showHaul(points,paths,direction){
+    this.haulLayers.clearLayers();
+    if(paths?.[direction]){
+      const lines=paths[direction].edges.map(id=>this.paths.get(String(id)).points);
+      L.polyline(lines,{pane:'routeLayer',renderer:this.routeRenderer,interactive:false,color:direction==='outward'?'#106fb9':'#ba477b',weight:6}).addTo(this.haulLayers);
+    }
+    for(const [key,label] of [['loadNode','Погрузка'],['siteNode','Площадка']]){
+      const coords=this.network.nodes[points[key]];
+      if(coords)L.circleMarker([coords[1],coords[0]],{radius:7,color:'#222',fillColor:key==='loadNode'?'#ffc04a':'#73dcad',fillOpacity:1})
+        .bindTooltip(label,{permanent:true,direction:'top'}).addTo(this.haulLayers);
+    }
+  }
   zoom(factor){this.map.setZoom(this.map.getZoom()+(factor>1?1:-1));}
   highlight(id) {
     this.selected=id;
@@ -189,6 +268,7 @@ export class RoadMap {
     this.paint(true);
   }
   styleFor(id,path) {
+    if(this.mode==='coverage'){const n=this.coverage?.get(id)?.length??0;return n>1?'overlap':n?'single':'none';}
     const closed=this.closed.has(id), proposed=this.draft?.has(id) ?? closed;
     if(closed!==proposed)return 'draft';
     if(closed)return 'closed';
@@ -232,6 +312,7 @@ export class RoadMap {
       }
     }
     this.markers.clearLayers();
+    if(this.mode==='coverage')return;
     const positions=new Map();
     for(const route of this.routes || []) {
       if(!route.legs.length)continue;

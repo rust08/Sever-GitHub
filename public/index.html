@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#101d24">
   <title>Север · Диспетчерская расчистки</title>
   <link rel="stylesheet" href="/vendor/leaflet.css"><link rel="stylesheet" href="/style.css"><link rel="stylesheet" href="/map.css"><script src="/vendor/leaflet.js" defer></script>
+  <script src="/equipment-evidence.js" defer></script>
   <script src="/app.js" type="module"></script>
 </head>
 <body>
@@ -31,7 +32,7 @@
         </aside>
         <section class="map-panel panel" id="shift-map">
           <div class="panel-head"><div><h2>Карта расчистки</h2><p id="map-count"></p></div><label class="vehicle-filter"><span>Маршрут</span><select id="filter"><option value="">Все машины</option></select></label></div>
-          <div class="map-toolbar"><label>Слой карты <select id="map-mode"><option value="priority">Приоритеты дорог</option><option value="state">Расчистка по времени</option><option value="routes">Маршруты машин</option></select></label></div><div class="map-wrap"><div id="map" aria-label="Карта дорог Петропавловска-Камчатского" role="region"></div><div class="map-buttons"><button id="zoom-in" aria-label="Приблизить карту">+</button><button id="zoom-out" aria-label="Отдалить карту">−</button><button id="fit" aria-label="Весь город" title="Весь город">⌖</button></div><div class="map-info" id="map-info" hidden></div><div class="credits"><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap</a> · <a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md" target="_blank" rel="noreferrer">Рельеф Mapzen, USGS, NOAA</a> · <a href="https://leafletjs.com/">Leaflet</a></div></div>
+          <div class="map-toolbar"><label>Слой карты <select id="map-mode"><option value="priority">Приоритеты дорог</option><option value="state">Расчистка по времени</option><option value="routes">Маршруты машин</option><option value="territory">Ответственность за расчистку · пилот</option></select></label></div><div id="coverage-controls" hidden><label>Дата работ <input id="coverage-date" type="date"></label><label>Вид работ <select id="coverage-operation"></select></label><label>Данные <select id="coverage-source"><option value="document_review">Документы на проверке</option><option value="simulation">Учебные записи</option></select></label><label>Редакции, сохранённые к моменту (Камчатка, пусто — сейчас) <input type="datetime-local" step="0.001" id="coverage-cutoff"></label><p id="coverage-status" aria-live="polite"></p><select id="coverage-find" aria-label="Перейти к участку с записью"></select></div><div class="map-wrap"><div id="map" aria-label="Карта дорог Петропавловска-Камчатского" role="region"></div><div class="map-buttons"><button id="zoom-in" aria-label="Приблизить карту">+</button><button id="zoom-out" aria-label="Отдалить карту">−</button><button id="fit" aria-label="Весь город" title="Весь город">⌖</button></div><div class="map-info" id="map-info" hidden></div><div class="credits"><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">© OpenStreetMap</a> · <a href="https://github.com/tilezen/joerd/blob/master/docs/attribution.md" target="_blank" rel="noreferrer">Рельеф Mapzen, USGS, NOAA</a> · <a href="https://leafletjs.com/">Leaflet</a></div></div>
           <div class="time"><div><label for="minute">Время на карте по плану</label><output id="clock">08:00</output></div><input type="range" id="minute" min="0" max="240" value="0" step="any"><div class="time-ticks"><span id="time-start"></span><span id="time-end"></span></div></div>
           <div class="legend" id="map-legend" aria-label="Условные обозначения карты"></div>
           <p class="map-help">Выберите участок на карте, чтобы изменить проезд или подтвердить срочный вызов в нужном направлении. Оранжевый пунктир отмечает изменения до пересчёта.</p>
@@ -39,16 +40,71 @@
         </section>
       </div>
       
+      <details class="panel page" id="haul-panel"><summary>Вывоз снега · учебный расчёт рейсов</summary>
+        <p>Одна точка погрузки и один пост разгрузки. Расчёт использует длительность и бюджет сохранённой смены отдельно от городского плана. Машины начинают у места погрузки и возвращаются туда. Путь можно рассчитать по дорожной сети или задать временем вручную.</p>
+        <form id="haul-form">
+          <label>Техника <select id="haul-fleet"><option value="sample">Пример: погрузчик и два самосвала</option><option value="shift">Выбранные машины сохранённой смены</option></select></label>
+          <label>Путь <select id="haul-travel"><option value="manual">Время вручную</option><option value="network">По городской сети</option></select></label>
+          <div id="haul-points" hidden><p>Нажмите кнопку, затем нужную дорогу. Точка привяжется к ближайшему из двух концов участка.</p>
+          <button type="button" id="haul-loadNode">Выбрать погрузку</button> <span id="haul-loadNode-label"></span>
+          <button type="button" id="haul-siteNode">Выбрать площадку</button> <span id="haul-siteNode-label"></span>
+          <details><summary>Ограничения транзитных участков</summary><p>Сценарные ограничения действуют в обоих направлениях до перезагрузки страницы.</p>
+          <button type="button" id="transit-pick">Выбрать участок ограничения</button><span id="transit-road"></span>
+          <label>Допустимая полная масса, кг <input type="number" id="transit-maxKg" min="1"></label>
+          <label>Доступная ширина, м <input type="number" id="transit-widthM" min="0.01" step="any"></label>
+          <label>Уклон, % <input type="number" id="transit-gradePct" min="0" step="any"></label>
+          <label>Основание или учебное допущение <input id="transit-source" maxlength="240"></label>
+          <button type="button" id="transit-add">Применить к участку</button><p id="transit-status" aria-live="polite"></p><div id="transit-list"></div></details></div>
+          <div class="fleet-fields" id="haul-fields"></div>
+          <label>Плотность вывозимого снега, кг/м³ (пусто — расчёт только по объёму)<input id="haul-density" type="number" min="1" step="1" placeholder="По замеру или учебному сценарию"></label>
+          <label><input id="haul-permit" type="checkbox"> Предположить допуск площадки к приёму этого снега в учебном сценарии</label>
+          <button type="submit">Рассчитать рейсы</button>
+        </form>
+        <div id="haul-result" aria-live="polite"></div>
+      </details>
+      <details class="panel page" id="fleet-evidence"><summary>Свидетельства о технике и ресурсах</summary>
+        <p>Публикации из исследования от 20 ноября 2026 года. Доступность конкретной машины задаётся в карточке смены.</p>
+        <label>Сообщение <select id="equipment-observation"></select></label><div id="equipment-source"></div>
+      </details>
+      <details class="panel page" id="registry-panel" hidden>
+        <summary>Реестр ответственности · документы и редакции</summary>
+        <p>Выберите сохранённую редакцию для просмотра или создайте первую. Каждое сохранение добавляет редакцию. Документы на проверке требуют решения уполномоченного лица.</p>
+        <label>Редакция <select id="reg-version"><option value="">Новая запись</option></select></label>
+        <div id="reg-detail"></div>
+        <details id="reg-manual"><summary>Ввести одну адресную строку вручную</summary>
+          <p>Выберите участок на городской карте. Чтобы подготовить редакцию из нескольких строк, загрузите JSON ниже.</p>
+          <label>Режим <select id="reg-mode"><option value="simulation">Учебная запись</option><option value="document_review">Документ на проверке</option></select></label>
+          <div id="reg-fields"></div>
+          <button type="button" id="reg-edge">Взять выбранный на карте участок</button>
+        </details>
+        <label>Адресные строки (JSON) <input id="reg-file" type="file" accept=".json"></label>
+        <button type="button" class="row-button" id="reg-example">Подставить учебный пример</button>
+        <label>Источник документа <input id="reg-url" type="url" placeholder="https://"></label>
+        <label>Приложение PDF (до 12 МиБ) <input id="reg-pdf" type="file" accept=".pdf"></label>
+        <button type="button" id="reg-save">Сохранить редакцию</button>
+        <p id="reg-status" aria-live="polite"></p>
+      </details>
       <details class="panel page" id="order-panel">
         <summary><strong>Учебный наряд · основания и приёмка</strong></summary>
         <p>Выберите участок на карте и нажмите «Проверить учебный наряд». Досье и документы в примере вымышлены. Пробный маршрут рассчитывается отдельно от смены. Журнал сохраняется в этом браузере.</p>
         <p id="order-road"></p>
-        <label>Досье <select id="order-case"><option value="unknown">Документы отсутствуют</option><option value="example">Учебный договор на выбранный участок</option><option value="outside">Участок вне учебного договора</option><option value="expired">Договор истёк к началу смены</option></select></label>
+        <label>Досье <select id="order-case"><option value="unknown">Документы отсутствуют</option><option value="example">Учебный договор на выбранный участок</option><option value="outside">Участок вне учебного договора</option><option value="expired">Договор истёк к началу смены</option><option value="attachment">Строки учебного приложения</option></select></label>
+        <div id="attachment-controls" hidden><p>Пример содержит участок проспекта Победы и строку с неизвестной геометрией. Дата окончания исключается. Файл используется только в этой вкладке.</p><button type="button" id="attachment-show">Показать участок примера</button> <button type="button" id="attachment-save">Скачать пример JSON</button><label>Открыть своё учебное приложение (JSON)<input type="file" accept=".json" id="attachment-file"></label></div>
         <label>Машина из смены <select id="order-vehicle"></select></label>
         <label>Операция <select id="order-operation"></select></label>
         <label>Направление <select id="order-direction"></select></label>
-        <label><input type="checkbox" id="order-event"> Смоделировать подтверждённое окончание снегопада</label>
-        <label>Через сколько минут после начала смены закончился снегопад <input type="number" id="order-offset" min="0" step="1" value="0" disabled></label>
+        <label>Тип объекта в учебном паспорте <select id="clock-object"><option value="roadway">Проезжая часть</option><option value="sidewalk">Тротуар</option></select></label>
+        <label>Очередь содержания <select id="clock-queue"><option value="1">Первая</option><option value="2">Вторая</option></select></label>
+        <label><input type="checkbox" id="order-event"> Задать учебное погодное событие</label>
+        <label>Событие <select id="clock-kind"><option value="snowfall_end">Окончание снегопада</option><option value="ice_detected">Обнаружение скользкости</option></select></label>
+        <label>Через сколько минут после начала смены произошло событие <input type="number" id="order-offset" min="0" step="1" value="0" disabled></label>
+        <label>Повторное событие того же вида, минут от начала смены (необязательно) <input type="number" min="1" step="1" id="clock-repeat" disabled></label>
+        <details><summary>Ограничения на месте работы · учебная проверка</summary>
+          <p>Заполняйте известные ограничения. Проверка относится к выбранному участку. Для пути до него нужны отдельные данные.</p>
+          <label>Свободная ширина прохода, м <input type="number" min="0.01" step="any" id="limit-width"></label>
+          <label>Допустимая масса, т <input type="number" min="0.01" step="any" id="limit-mass"></label>
+          <label>Уклон участка, % <input type="number" min="0" step="any" id="limit-grade"></label>
+        </details>
         <div id="order-output" aria-live="polite"></div>
       </details>
       <section class="panel detail-panel" id="shift-details">

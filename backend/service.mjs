@@ -1,3 +1,5 @@
+import {calculateHaul} from './haul.mjs';
+import {equipmentFields,resourceReason} from './equipment.mjs';
 import {previewOrder} from './order-preview.mjs';
 import {workTypes} from './governance.mjs';
 import {policy, passesForEdge, fleetSeed, makePasses} from './policy.mjs';
@@ -22,7 +24,8 @@ function validateFleet(fleet) {
     ensure(bounded(rate,1000000) && rate >= 0.01,'Проверьте тариф машины');
     ensure(bounded(workKmh,200) && bounded(driveKmh,200),'Задайте скорости расчистки и переезда от 0 до 200 км/ч, исключая ноль');
     ids.add(id);
-    return {id,name:name.trim(),type:type.trim(),rate,workKmh,driveKmh};
+    let equipment;try{equipment=equipmentFields(vehicle);}catch(e){throw new InputError(e.message);}
+    return {...equipment,id,name:name.trim(),type:type.trim(),rate,workKmh,driveKmh};
   });
 }
 function confirmedPasses(ids, edges) {
@@ -94,7 +97,14 @@ export function calculateShift(data,body) {
   for (const pass of confirmed) required.set(pass.id, pass);
   const tasks = [...required.values()];
   const fleet=(input.fleet??data.fleet).map(v=>({...v,rate:Object.hasOwn(input.rates,v.id)?input.rates[v.id]:v.rate}));
-  const result=plan(data.network,tasks,fleet,input);
+  const excludedVehicles=[];
+  const eligible=fleet.filter(v=>{
+    const reason=resourceReason(v,input,'patrol_plow');
+    if(reason && input.vehicleIds.includes(v.id))excludedVehicles.push({id:v.id,name:v.name,reason});
+    return !reason;
+  });
+  const result=plan(data.network,tasks,eligible,input);
+  result.excludedVehicles=excludedVehicles;
   result.priorities=confirmed;
   const id=crypto.randomUUID();
   return {id,input,result};
@@ -105,7 +115,12 @@ export function evaluateOrder(data,body) {
   const input=validate(body.shift,data);
   try{return previewOrder(data,input,body)}catch(error){throw new InputError(error.message)}
 }
+export function evaluateHaul(data,body){
+  const input=validate(body?.shift,data);
+  try{return calculateHaul(input,input.fleet??data.fleet,body.options,data.network);}catch(e){throw new InputError(e.message);}
+}
 export async function api(db,method,path,body,data) {
+  if(method==='POST' && path==='/api/haul/preview')return evaluateHaul(data,body);
   if(method==='POST' && path==='/api/orders/preview')return evaluateOrder(data,body);
   if (method==='GET' && path==='/api/data') {
     const [latest]=await db.rows('SELECT id,input_json,result_json FROM city_plans WHERE network_version=? ORDER BY seq DESC LIMIT 1',[data.network.version]);
