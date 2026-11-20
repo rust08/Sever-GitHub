@@ -264,6 +264,16 @@ function showRoad(id) {
   if(!title)return;
   const close=add(root,'button','×','row-button');close.type='button';close.setAttribute('aria-label','Закрыть карточку');close.onclick=()=>{root.hidden=true;};
   add(root,'strong',title);
+  if(roadMap?.mode==='coverage'){
+    const rows=roadMap.coverage?.get(key)??[];
+    if(!roadMap.coverage)add(root,'p','Срез сейчас недоступен.');
+    else if(!rows.length)add(root,'p','В выбранном срезе нет строки реестра.');
+    else {
+      add(root,'p',rows.length>1?'Пересечение строк — требуется проверка.':$('coverage-source').selectedOptions[0].textContent);
+      for(const r of rows)add(root,'p',r.contract_id+' · ред. '+r.revision+' · '+r.executor+' · '+r.source+', '+r.clause);
+    }
+    return;
+  }
   const review=add(root,'button','Проверить учебный наряд','row-button');review.type='button';review.onclick=()=>openOrder(edges.get(key).id);
   const edgeTasks=byRoad.get(key)||[];
   for(const t of edgeTasks){
@@ -449,6 +459,7 @@ async function init() {
     $('workspace').hidden = false;
     initRegistry();
     roadMap = new RoadMap($('map'),data.network,pickColor,showRoad,data.tasks);
+    initCoverage();
     syncDraft();
     $('status').textContent = '';
     if (data.latest) renderPlan(data.latest); else await calculate();
@@ -580,7 +591,46 @@ function initRegistry(){
       }):undefined;
       const record=await api('/api/registry',{file,pdfBase64,sourceUrl:$('reg-url').value.trim(),baseRevision:opened?.revision??0});
       await list(JSON.stringify([record.contract_id,record.revision]));
+      if(roadMap.mode==='coverage')roadMap.onModeChange('coverage');
       status.textContent='Сохранена редакция '+record.revision+'.';
     }catch(error){failure(error);}finally{controls(false);}
   };
+}
+
+function initCoverage(){
+  if($('registry-panel').hidden)return;
+  $('map-mode').add(new Option('Покрытие по реестру · город','coverage'));
+  const controls=$('coverage-controls'),status=$('coverage-status'),find=$('coverage-find');
+  const day=$('coverage-date'),operation=$('coverage-operation'),source=$('coverage-source'),time=$('coverage-cutoff');
+  day.value=$('date').value||initialDate();
+  for(const [value,title] of Object.entries(data.workTypes))operation.add(new Option(title,value));
+  let sequence=0;
+  async function refresh(mode){
+    const version=++sequence;
+    controls.hidden=mode!=='coverage';
+    if(controls.hidden)return;
+    roadMap.coverage=null;roadMap.paint(true);roadMap.highlight(null);
+    find.replaceChildren();find.hidden=true;
+    status.textContent='Загрузка среза…';
+    try{
+      const params=new URLSearchParams({date:day.value,operation:operation.value,mode:source.value});
+      if(time.value)params.set('asOf',new Date(time.value+'+12:00').toISOString());
+      const result=await api('/api/registry/coverage?'+params);
+      if(version!==sequence)return;
+      roadMap.coverage=new Map(result.entries);roadMap.paint(true);
+      if(roadMap.selected)showRoad(roadMap.selected);
+      const summary=Object.entries({single:'Одна строка',overlap:'Пересечение',unknown:'Без строки'}).map(([key,title])=>{
+        const bucket=result.stats[key];
+        return title+': '+format(bucket.km,2)+' км ('+bucket.edges+' уч.)';
+      });
+      status.textContent='Городская дорожная сеть · '+summary.join(' · ')+'. Строк без геометрии: '+result.unmapped.length+'.';
+      for(const r of result.unmapped)add(status,'span',' '+r.contract_id+', строка '+r.line+' ('+r.edge_id+').');
+      find.add(new Option('Найти участок на карте',''));
+      for(const [id,rows] of result.entries)find.add(new Option((edges.get(id)?.name||id)+' · '+rows[0].contract_id+(rows.length>1?' · пересечение':''),id));
+      find.hidden=!result.entries.length;
+    }catch(error){if(version===sequence)status.textContent='Срез недоступен: '+error.message;}
+  }
+  find.onchange=()=>{if(find.value)roadMap.focus(find.value);};
+  for(const element of [day,operation,source,time])element.onchange=()=>refresh(roadMap.mode);
+  roadMap.onModeChange=refresh;
 }

@@ -53,6 +53,39 @@ function saveRevision(db,network,body){
     db.exec('COMMIT');return {contract_id:contract,revision};
   }catch(e){db.exec('ROLLBACK');throw e;}
 }
+function readCoverage(db,network,params){
+  const date=params.get('date'),operation=params.get('operation'),mode=params.get('mode');
+  const cutoff=params.get('asOf')??new Date().toISOString();
+  if(!validDay(date) || !Object.hasOwn(workTypes,operation) || !['simulation','document_review'].includes(mode) ||
+     !Number.isFinite(Date.parse(cutoff)) || new Date(cutoff).toISOString()!==cutoff)
+    fail('Проверьте дату работ, операцию, тип записей и момент среза');
+  const rows=db.prepare(`
+    WITH latest AS (
+      SELECT contract_id,MAX(revision) AS revision FROM responsibility_revisions
+      WHERE recorded_at<=? GROUP BY contract_id
+    )
+    SELECT s.edge_id,s.mapped,s.contract_id,s.revision,s.line,s.executor,s.source,s.clause
+    FROM latest JOIN responsibility_revisions r USING(contract_id,revision)
+    JOIN responsibility_scope_rows s USING(contract_id,revision)
+    WHERE r.network_version=? AND r.mode=? AND s.operation=? AND s.date_from<=? AND ?<s.date_until
+    ORDER BY s.edge_id,s.contract_id,s.line
+  `).all(cutoff,network.version,mode,operation,date,date);
+  const groups=new Map(),unmapped=[];
+  for(const row of rows){
+    if(!row.mapped){unmapped.push(row);continue;}
+    if(!groups.has(row.edge_id))groups.set(row.edge_id,[]);
+    groups.get(row.edge_id).push(row);
+  }
+  const stats={};
+  for(const key of ['unknown','single','overlap'])stats[key]={edges:0,km:0};
+  for(const edge of network.edges){
+    const count=groups.get(edge.id)?.length??0;
+    const bucket=stats[count>1?'overlap':count?'single':'unknown'];
+    bucket.edges++;bucket.km+=edge.km;
+  }
+  return {networkVersion:network.version,date,operation,mode,asOf:cutoff,stats,entries:[...groups],unmapped};
+}
+
 export async function registryResponse(request,db,network){
   const url=new URL(request.url);
   const json=(value,status=200)=>Response.json(value,{status,headers:{'Cache-Control':'no-store'}});
@@ -63,6 +96,7 @@ export async function registryResponse(request,db,network){
       return json(saveRevision(db,network,body),201);
     }
     if(request.method!=='GET')return json({error:'Метод недоступен'},405);
+    if(url.pathname==='/api/registry/coverage')return json(readCoverage(db,network,url.searchParams));
     if(url.pathname==='/api/registry')return json(db.prepare('SELECT contract_id,revision,mode,recorded_at FROM responsibility_revisions ORDER BY contract_id,revision DESC').all());
     const contract=url.searchParams.get('contract'), revision=Number(url.searchParams.get('revision'));
     const record=db.prepare('SELECT * FROM responsibility_revisions WHERE contract_id=? AND revision=?').get(contract,revision);

@@ -42,3 +42,29 @@ test('register preserves original PDF, asset and old scope across restart; concu
   assert.equal(db.prepare('SELECT count(*) AS n FROM responsibility_documents').get().n,1);
   assert.equal(JSON.parse(db.prepare('SELECT geometry_json FROM responsibility_assets').get().geometry_json).length,2);
 });
+
+test('coverage resolves revision before filtering operation/date and counts edge length once',async t=>{
+  const db=new DatabaseSync(':memory:');t.after(()=>db.close());
+  db.exec(readFileSync(new URL('../drizzle/0002_responsibility_register.sql',import.meta.url),'utf8'));
+  const network={version:'n',edges:[{id:'a',km:2,geometry:[[1,2],[2,3]]},{id:'b',km:3}]};
+  const row={edgeId:'a',operation:'patrol_plow',customer:'A',executor:'B',officer:'C',source:'D',clause:'1',reviewer:'R',from:'2026-01-01',until:'2027-01-01'};
+  async function save(id,rev,rows,at){
+    const request=new Request('http://localhost/api/registry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
+      baseRevision:rev,file:{mode:'simulation',networkVersion:'n',rows:rows.map(r=>({...r,contractId:id}))}})});
+    assert.equal((await registryResponse(request,db,network)).status,201);
+    db.prepare('UPDATE responsibility_revisions SET recorded_at=? WHERE contract_id=? AND revision=?').run(at,id,rev+1);
+  }
+  const first='2026-01-10T00:00:00.000Z',last='2026-01-11T00:00:00.000Z';
+  await save('one',0,[row,{...row,edgeId:'orphan'}],first);
+  await save('two',0,[row],first);
+  await save('two',1,[{...row,operation:'sidewalk'}],last);
+  const run=(asOf,mode='simulation',date='2026-11-20')=>registryResponse(new Request('http://localhost/api/registry/coverage?'+new URLSearchParams({
+    date,asOf,mode,operation:'patrol_plow'})),db,network);
+  const past=await (await run(first)).json();
+  assert.deepEqual(past.stats.overlap,{edges:1,km:2});assert.equal(past.unmapped.length,1);
+  assert.deepEqual(past.stats.unknown,{edges:1,km:3});assert.equal(past.entries[0][1].length,2);
+  const current=await (await run(last)).json();assert.deepEqual(current.stats.single,{edges:1,km:2});
+  for(const args of [[last,'document_review'],[last,'simulation','2027-01-01']])
+    assert.deepEqual((await (await run(...args)).json()).stats.unknown,{edges:2,km:5});
+  assert.equal((await run('bad')).status,400);
+});

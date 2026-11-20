@@ -6,6 +6,7 @@ const COLORS = {none:'#99a6a8', p1:'#bd2650', p2:'#a55108', p3:'#2a668e', p4:'#6
   pending:'#547394', active:'#005faa', partial:'#896422', done:'#22784a', missed:'#ab4455'};
 const swatch = (color, weight, dashArray = null) => ({color, weight, dashArray, opacity:1});
 const STYLES = {
+  single:swatch('#286faf',5),overlap:swatch('#ae3062',6),
   none:swatch(COLORS.none,1), p1:swatch(COLORS.p1,5), p2:swatch(COLORS.p2,3.8),
   p3:swatch(COLORS.p3,2.5), p4:swatch(COLORS.p4,1.4), pending:swatch(COLORS.pending,2.5),
   active:swatch(COLORS.active,6), partial:swatch(COLORS.partial,3.5), done:swatch(COLORS.done,3.5),
@@ -132,13 +133,21 @@ export class RoadMap {
         for(const [id,name,way,coordinates] of territoryPilot.roads){
           const points=coordinates.map(([longitude,latitude])=>[latitude,longitude]);
           const line=L.polyline(points,{color:'#59646c',weight:5,bubblingMouseEvents:false}).addTo(this.pilot);
+          line.pilotId=id;
           line.bindPopup(()=>{
             const card=document.createElement('div');
             const title=document.createElement('strong');
             title.textContent=name || 'Участок без названия';
             const details=document.createElement('p');
             details.textContent='Расчистка · '+territoryPilot.date+' · исполнитель не подтверждён. Участок '+id+' · OSM way '+way;
-            card.append(title,details);return card;
+            card.append(title,details);
+            if(this.showPilotHints)for(const [date,operation,operator,url] of territoryPilot.hints[id]??[]){
+              const hint=document.createElement('p');
+              hint.textContent=date+' · '+operator+' · '+operation+' · совпало название улицы. Граница работ не подтверждена. ';
+              const source=document.createElement('a');source.href=url;source.target='_blank';source.rel='noreferrer';source.textContent='Историческое сообщение';
+              hint.append(source);card.append(hint);
+            }
+            return card;
           });
         }
       }
@@ -154,14 +163,23 @@ export class RoadMap {
     }
     document.getElementById('map-mode').value=mode;
     this.legend();this.paint(true);
+    this.onModeChange?.(mode);
   }
   legend() {
     const root=document.getElementById('map-legend');
     root.replaceChildren();
     if(this.mode==='territory'){
       root.textContent='Пилот · '+territoryPilot.date+' · расчистка. Для всех '+territoryPilot.roads.length+' участков исполнитель не подтверждён. Нажмите на дорогу для просмотра.';
+      const label=document.createElement('label'),toggle=document.createElement('input');
+      toggle.type='checkbox';toggle.checked=Boolean(this.showPilotHints);
+      toggle.onchange=()=>{
+        this.showPilotHints=toggle.checked;this.map.closePopup();
+        this.pilot.eachLayer(line=>line.setStyle({color:toggle.checked && territoryPilot.hints[line.pilotId]?'#7840a0':'#59646c'}));
+      };
+      label.append(toggle,document.createTextNode('Фиолетовый — историческое упоминание улицы'));root.append(label);
       return;
     }
+    if(this.mode==='coverage'){root.textContent='Серый — без строки · синий — одна строка · малиновый — пересечение строк';return;}
     for(const [key,label] of [...labels[this.mode],['closed','Перекрыто'],['draft','Изменение перекрытия'],['base','База']]) {
       const row=document.createElement('span'), mark=document.createElement('i');
       if(key==='base') mark.textContent='◆';
@@ -232,6 +250,7 @@ export class RoadMap {
     this.paint(true);
   }
   styleFor(id,path) {
+    if(this.mode==='coverage'){const n=this.coverage?.get(id)?.length??0;return n>1?'overlap':n?'single':'none';}
     const closed=this.closed.has(id), proposed=this.draft?.has(id) ?? closed;
     if(closed!==proposed)return 'draft';
     if(closed)return 'closed';
@@ -275,6 +294,7 @@ export class RoadMap {
       }
     }
     this.markers.clearLayers();
+    if(this.mode==='coverage')return;
     const positions=new Map();
     for(const route of this.routes || []) {
       if(!route.legs.length)continue;

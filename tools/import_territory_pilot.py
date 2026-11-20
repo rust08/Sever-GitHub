@@ -1,5 +1,7 @@
 from pathlib import Path
 from zipfile import ZipFile
+import csv
+import io
 import hashlib
 import json
 
@@ -29,6 +31,14 @@ with ZipFile(root / "research" / (name + ".zip")) as archive:
     if len({row[0] for row in rows}) != len(rows) or coverage["status_counts"] != {"unverified": len(rows)} or len(rows) != coverage["total_edges"]:
         raise ValueError("Pilot coverage and geometry disagree")
 
-snapshot = {"date": coverage["date"], "operation": coverage["operation"], "roads": rows}
+    hints = {}
+    candidates = read(prefix + "historical_candidates_NOT_ASSIGNMENTS.csv").decode("utf-8-sig")
+    for item in csv.DictReader(io.StringIO(candidates)):
+        if item["current_assignment"] != "DO_NOT_INFER" or item["MATCH_TYPE"] != "EXACT_NORMALIZED_STREET_NAME_ONLY":
+            raise ValueError("Unexpected historical candidate type")
+        hints.setdefault(item["edge_id"], []).append([item["event_date"], item["reported_operation"],
+                                                     item["operator_in_historical_report"], item["source_url"]])
+
+snapshot = {"hints": hints, "date": coverage["date"], "operation": coverage["operation"], "roads": rows}
 output = "export const territoryPilot=" + json.dumps(snapshot, ensure_ascii=False, separators=(",", ":")) + ";\n"
 (root / "public" / "territory-pilot.js").write_text(output, encoding="utf-8", newline="\n")
