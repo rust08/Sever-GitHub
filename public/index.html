@@ -41,9 +41,13 @@
       </div>
       
       <details class="panel page" id="haul-panel"><summary>Вывоз снега · учебный расчёт рейсов</summary>
-        <p>Одна точка погрузки и один пост разгрузки. Расчёт использует длительность и бюджет сохранённой смены отдельно от городского плана. Машины начинают у места погрузки и возвращаются туда. Время пути задаёт диспетчер.</p>
+        <p>Одна точка погрузки и один пост разгрузки. Расчёт использует длительность и бюджет сохранённой смены отдельно от городского плана. Машины начинают у места погрузки и возвращаются туда. Путь можно рассчитать по дорожной сети или задать временем вручную.</p>
         <form id="haul-form">
           <label>Техника <select id="haul-fleet"><option value="sample">Пример: погрузчик и два самосвала</option><option value="shift">Выбранные машины сохранённой смены</option></select></label>
+          <label>Путь <select id="haul-travel"><option value="manual">Время вручную</option><option value="network">По городской сети</option></select></label>
+          <div id="haul-points" hidden><p>Нажмите кнопку, затем нужную дорогу. Точка привяжется к ближайшему из двух концов участка.</p>
+          <button type="button" id="haul-loadNode">Выбрать погрузку</button> <span id="haul-loadNode-label"></span>
+          <button type="button" id="haul-siteNode">Выбрать площадку</button> <span id="haul-siteNode-label"></span></div>
           <div class="fleet-fields" id="haul-fields"></div>
           <label><input id="haul-permit" type="checkbox"> Предположить допуск площадки к приёму этого снега в учебном сценарии</label>
           <button type="submit">Рассчитать рейсы</button>

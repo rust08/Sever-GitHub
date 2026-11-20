@@ -117,7 +117,7 @@ export function evaluateOrder(data,body) {
 }
 export function evaluateHaul(data,body){
   const input=validate(body?.shift,data);
-  try{return calculateHaul(input,input.fleet??data.fleet,body.options);}catch(e){throw new InputError(e.message);}
+  try{return calculateHaul(input,input.fleet??data.fleet,body.options,data.network);}catch(e){throw new InputError(e.message);}
 }
 export async function api(db,method,path,body,data) {
   if(method==='POST' && path==='/api/haul/preview')return evaluateHaul(data,body);

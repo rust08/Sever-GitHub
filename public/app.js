@@ -707,7 +707,11 @@ function initEquipmentObservations(){
 initEquipmentObservations();
 
 let haulRevision=0;
-function clearHaul(){haulRevision++;$('haul-result').replaceChildren();}
+const haulPoints={};
+function clearHaul(){
+  haulRevision++;$('haul-result').replaceChildren();
+  if(roadMap)roadMap.showHaul($('haul-travel').value==='network'?haulPoints:{});
+}
 function initHaul(){
   const fields=[
     ['volume','Снег к вывозу, м³',60,1,1000000],['siteCapacity','Свободная вместимость площадки, м³',60,0,1000000],
@@ -719,16 +723,47 @@ function initHaul(){
     Object.assign(input,{id:'haul-'+key,type:'number',value,min,max,step:1,required:true});
   }
   const form=$('haul-form');form.oninput=clearHaul;
+  const travel=$('haul-travel'),mapBox=$('map');
+  travel.onchange=()=>{
+    const manual=travel.value==='manual';
+    $('haul-points').hidden=manual;$('haul-driveMin').disabled=!manual;
+    $('haul-driveMin').parentElement.hidden=!manual;
+    if(roadMap)roadMap.onHaulPick=null;
+    clearHaul();
+  };
+  for(const key of ['loadNode','siteNode']){
+    $('haul-'+key).onclick=()=>{
+      if(!roadMap)return;
+      roadMap.setMode('priority');roadMap.highlight(null);
+      $('haul-'+key+'-label').textContent='Нажмите дорогу на карте';
+      roadMap.onHaulPick=(node,name)=>{
+        roadMap.onHaulPick=null;haulPoints[key]=node;
+        $('haul-'+key+'-label').textContent=name+' · узел '+node;
+        clearHaul();$('haul-form').scrollIntoView({block:'center'});
+      };
+      mapBox.scrollIntoView({block:'center'});
+    };
+  }
   form.onsubmit=async e=>{
     e.preventDefault();clearHaul();
     const revision=haulRevision,out=$('haul-result');
     if(!plan){add(out,'p','Сначала рассчитайте смену.');return;}
     const options={fleetMode:$('haul-fleet').value,sitePermitted:$('haul-permit').checked};
+    Object.assign(options,{travelMode:travel.value},travel.value==='network'?haulPoints:{});
     for(const [key] of fields)options[key]=$('haul-'+key).valueAsNumber;
     try{
       const result=await api('/api/haul/preview',{shift:plan.input,options});
       if(revision!==haulRevision)return;
       add(out,'strong','Вывоз по плану: '+result.delivered+' м³ · остаток '+result.remaining+' м³ · '+money(result.cost));
+      if(result.paths){
+        for(const [direction,label] of [['outward','Туда'],['home','Обратно']]){
+          const path=result.paths[direction];
+          if(!path){add(out,'p',label+' · путь отсутствует');continue;}
+          const btn=add(out,'button',label+' · '+format(path.km,2)+' км · показать на карте','row-button');btn.type='button';
+          btn.onclick=()=>{roadMap.setMode('priority');roadMap.showHaul(haulPoints,result.paths,direction);mapBox.scrollIntoView({block:'center'});};
+        }
+        roadMap.showHaul(haulPoints,result.paths,'outward');
+      }
       if(result.reason)add(out,'p',result.reason);
       if(!result.trips.length)return;
       add(out,'p',result.loader+' · время Камчатки. В стоимости учтены погрузка и занятость самосвала от начала погрузки до возврата, включая ожидание.');

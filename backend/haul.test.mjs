@@ -35,3 +35,15 @@ test('haul uses selected distinct resources and checks availability and unloadin
     assert.equal(run([{...truck,...change},loader],['t','l']).delivered,0);
   }
 });
+
+test('network haul uses independent directed paths, excludes closed and restricted edges, and charges the actual return',()=>{
+  const network={nodes:{a:[0,0],b:[1,0],c:[1,1]},edges:[
+    {id:'out',from:'a',to:'b',km:2,oneway:true},{id:'around',from:'b',to:'c',km:3,oneway:true},
+    {id:'home',from:'c',to:'a',km:1,oneway:true},{id:'restricted',from:'b',to:'a',km:0.5,routable:false}]};
+  const params={...options,volume:10,siteBusyUntil:0,travelMode:'network',loadNode:'a',siteNode:'b'};
+  const run=(closed=[],changes={})=>calculateHaul({...shift,closed},[],{...params,...changes},network);
+  const r=run();assert.deepEqual(r.paths.outward.edges,['out']);assert.deepEqual(r.paths.home.edges,['around','home']);
+  const trip=r.trips[0];assert.equal(trip.arrive-trip.depart,6);assert.equal(trip.back-trip.finish,12);
+  assert.equal(r.cost,2020);assert.equal(run(['home']).delivered,0);assert.match(run(['home']).reason,/обратного/);
+  assert.equal(run(['out']).paths.outward,null);assert.throws(()=>run([],{siteNode:'a'}));assert.throws(()=>run([],{siteNode:'unknown'}));
+});

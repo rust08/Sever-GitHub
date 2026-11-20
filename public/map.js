@@ -98,7 +98,11 @@ export class RoadMap {
       const points=coords.map(([lon,lat])=>L.latLng(lat,lon));
       const id=String(edge.id);
       const line=L.polyline(points,{...STYLES.none,bubblingMouseEvents:false}).addTo(this.cityRoads);
-      line.on('click',()=>this.highlight(id));
+      line.on('click',event=>{
+        if(!this.onHaulPick){this.highlight(id);return;}
+        const node=event.latlng.distanceTo(points[0])<=event.latlng.distanceTo(points.at(-1))?edge.from:edge.to;
+        this.onHaulPick(String(node),edge.name||'Без названия');
+      });
       this.bounds.extend(line.getBounds());
       const taskList=this.edgeTasks.get(id) || [];
       const priority=taskList.reduce((p,t)=>Math.min(t.priority,p),5);
@@ -107,6 +111,7 @@ export class RoadMap {
     this.map.createPane('routeLayer').style.zIndex='420';
     this.map.getPane('routeLayer').style.pointerEvents='none';
     this.routeRenderer=L.canvas({pane:'routeLayer'});
+    this.haulLayers=L.layerGroup().addTo(this.map);
     this.routeLayers=L.layerGroup().addTo(this.map);
     this.markers=L.layerGroup().addTo(this.map);
     this.depot=L.latLng([...network.nodes[network.depot]].reverse());
@@ -123,6 +128,7 @@ export class RoadMap {
   setMode(mode) {
     if(this.mode===mode)return;
     this.highlight(null);
+    this.onHaulPick=null;this.haulLayers.clearLayers();
     this.mode=mode;
     if(mode==='territory'){
       this.previousView={center:this.map.getCenter(),zoom:this.map.getZoom()};
@@ -197,6 +203,18 @@ export class RoadMap {
     this.highlight(String(id));
   }
   fit(){this.map.fitBounds(this.bounds,{padding:[16,16],animate:false});this.highlight(null);}
+  showHaul(points,paths,direction){
+    this.haulLayers.clearLayers();
+    if(paths?.[direction]){
+      const lines=paths[direction].edges.map(id=>this.paths.get(String(id)).points);
+      L.polyline(lines,{pane:'routeLayer',renderer:this.routeRenderer,interactive:false,color:direction==='outward'?'#106fb9':'#ba477b',weight:6}).addTo(this.haulLayers);
+    }
+    for(const [key,label] of [['loadNode','Погрузка'],['siteNode','Площадка']]){
+      const coords=this.network.nodes[points[key]];
+      if(coords)L.circleMarker([coords[1],coords[0]],{radius:7,color:'#222',fillColor:key==='loadNode'?'#ffc04a':'#73dcad',fillOpacity:1})
+        .bindTooltip(label,{permanent:true,direction:'top'}).addTo(this.haulLayers);
+    }
+  }
   zoom(factor){this.map.setZoom(this.map.getZoom()+(factor>1?1:-1));}
   highlight(id) {
     this.selected=id;
