@@ -33,3 +33,9 @@
 Сохраняйте атрибуцию дорожных данных © OpenStreetMap contributors (ODbL 1.0), происхождение рельефа из Mapzen Terrain Tiles и лицензию комплектной Leaflet. Для муниципальных сведений фиксируйте источник, дату, единицы и условия использования. Демонстрационный перечень работ формируется по тегам OSM и проектным правилам. [Городские данные](data/CITY_SOURCES.md) · [Районная контрольная сеть](data/SOURCES.md) · [Лицензия Leaflet](public/vendor/leaflet-LICENSE.txt)
 
 В историю проекта включайте код, SQL-миграции, документацию и используемые приложением картографические ресурсы. Личные настройки, ключи, рабочие базы, полученные от подрядчика непубличные материалы, архивы и результаты сборки храните отдельно. Перед коммитом просмотрите список изменений в GitHub Desktop или через `git status --short` и `git diff --cached`.
+
+## Память проекта и новые задачи
+
+Навигатор: [`knowledge/00_INDEX.md`](knowledge/00_INDEX.md). Текущий план команды — [`research/BACKLOG.md`](research/BACKLOG.md), передача разработчикам — [`research/HANDOFF.md`](research/HANDOFF.md). Для задачи журнала читать [`knowledge/engineering/NEXT_01_EXECUTION_JOURNAL.md`](knowledge/engineering/NEXT_01_EXECUTION_JOURNAL.md), для общего плана — [`knowledge/engineering/NEXT_02_UNIFIED_SHIFT.md`](knowledge/engineering/NEXT_02_UNIFIED_SHIFT.md). Не читать все ZIP автоматически.
+
+Учитывать [`knowledge/research/EVIDENCE_RULES.md`](knowledge/research/EVIDENCE_RULES.md): интервью, архивные закупки и сценарные значения не эквивалентны действующим договорам, нормам и измерениям. Репозиторий публичный: непубличные интервью, личные и договорные данные не коммитить без разрешения.
