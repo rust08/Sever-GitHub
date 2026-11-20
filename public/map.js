@@ -1,3 +1,4 @@
+import {territoryPilot} from './territory-pilot.js';
 import {cityContext} from './city-context.js';
 // Leaflet owns the projection, panning, zoom, clipping and canvas hit testing.
 const L = window.L;
@@ -88,13 +89,14 @@ export class RoadMap {
     this.map.setMaxBounds(L.latLngBounds(reliefBounds));
     L.imageOverlay('/terrain-map.webp',reliefBounds,{pane:'tilePane',interactive:false,alt:'Рельеф Авачинской губы'}).addTo(this.map);
     addStreetDetail(this.map);
+    this.cityRoads=L.layerGroup().addTo(this.map);
     this.bounds=L.latLngBounds();
     for(const edge of network.edges) {
       const geometry=edge.geometry?.coordinates || edge.geometry;
       const coords=geometry?.length>1?geometry:[network.nodes[edge.from],network.nodes[edge.to]];
       const points=coords.map(([lon,lat])=>L.latLng(lat,lon));
       const id=String(edge.id);
-      const line=L.polyline(points,{...STYLES.none,bubblingMouseEvents:false}).addTo(this.map);
+      const line=L.polyline(points,{...STYLES.none,bubblingMouseEvents:false}).addTo(this.cityRoads);
       line.on('click',()=>this.highlight(id));
       this.bounds.extend(line.getBounds());
       const taskList=this.edgeTasks.get(id) || [];
@@ -111,15 +113,55 @@ export class RoadMap {
       interactive:false,keyboard:false,title:'База'}).addTo(this.map);
     this.map.on('click',()=>this.highlight(null));
     document.querySelector('#map-mode').addEventListener('change',e=>{
-      this.mode=e.target.value; this.legend();this.paint(true);
+      this.setMode(e.target.value);
     });
     this.observer=new ResizeObserver(()=>this.map.invalidateSize({pan:false}));
     this.observer.observe(container);
     this.map.setView([53.035,158.654],12.75);this.legend();this.paint(true);
   }
+  setMode(mode) {
+    if(this.mode===mode)return;
+    this.highlight(null);
+    this.mode=mode;
+    if(mode==='territory'){
+      this.previousView={center:this.map.getCenter(),zoom:this.map.getZoom()};
+      this.cityRoads.remove();
+      this.markers.remove();
+      if(!this.pilot){
+        this.pilot=L.featureGroup();
+        for(const [id,name,way,coordinates] of territoryPilot.roads){
+          const points=coordinates.map(([longitude,latitude])=>[latitude,longitude]);
+          const line=L.polyline(points,{color:'#59646c',weight:5,bubblingMouseEvents:false}).addTo(this.pilot);
+          line.bindPopup(()=>{
+            const card=document.createElement('div');
+            const title=document.createElement('strong');
+            title.textContent=name || 'Участок без названия';
+            const details=document.createElement('p');
+            details.textContent='Расчистка · '+territoryPilot.date+' · исполнитель не подтверждён. Участок '+id+' · OSM way '+way;
+            card.append(title,details);return card;
+          });
+        }
+      }
+      this.pilot.addTo(this.map);
+      this.map.fitBounds(this.pilot.getBounds(),{padding:[16,16],animate:false});
+    }else if(this.previousView){
+      this.map.closePopup();
+      this.pilot.remove();
+      this.cityRoads.addTo(this.map);
+      this.markers.addTo(this.map);
+      this.map.setView(this.previousView.center,this.previousView.zoom,{animate:false});
+      this.previousView=null;
+    }
+    document.getElementById('map-mode').value=mode;
+    this.legend();this.paint(true);
+  }
   legend() {
     const root=document.getElementById('map-legend');
     root.replaceChildren();
+    if(this.mode==='territory'){
+      root.textContent='Пилот · '+territoryPilot.date+' · расчистка. Для всех '+territoryPilot.roads.length+' участков исполнитель не подтверждён. Нажмите на дорогу для просмотра.';
+      return;
+    }
     for(const [key,label] of [...labels[this.mode],['closed','Перекрыто'],['draft','Изменение перекрытия'],['base','База']]) {
       const row=document.createElement('span'), mark=document.createElement('i');
       if(key==='base') mark.textContent='◆';
@@ -131,6 +173,7 @@ export class RoadMap {
     }
   }
   focus(id) {
+    if(this.mode==='territory')this.setMode('priority');
     const path=this.paths.get(String(id));if(!path)return;
     this.map.fitBounds(path.line.getBounds(),{maxZoom:17,padding:[48,48],animate:false});
     this.highlight(String(id));
