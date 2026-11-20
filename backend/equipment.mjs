@@ -33,6 +33,10 @@ export function equipmentFields(v){
     if(!Number.isSafeInteger(v.bodyM3)||v.bodyM3<=0||v.bodyM3>1000)throw Error('Проверьте объём кузова: 1–1000 м³');
     result.bodyM3=v.bodyM3;
   }
+  if(v.payloadKg!=null && v.payloadKg!==''){
+    if(!Number.isSafeInteger(v.payloadKg)||v.payloadKg<=0)throw Error('Укажите грузоподъёмность в целых положительных килограммах');
+    result.payloadKg=v.payloadKg;
+  }
   return result;
 }
 export function resourceReason(v,input,operation){

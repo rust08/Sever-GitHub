@@ -47,3 +47,24 @@ test('network haul uses independent directed paths, excludes closed and restrict
   assert.equal(r.cost,2020);assert.equal(run(['home']).delivered,0);assert.match(run(['home']).reason,/обратного/);
   assert.equal(run(['out']).paths.outward,null);assert.throws(()=>run([],{siteNode:'a'}));assert.throws(()=>run([],{siteNode:'unknown'}));
 });
+
+test('payload limits each trip and site capacity can require a partial last load',()=>{
+  const run=(extra={})=>calculateHaul(shift,[],{...options,siteCapacity:13,siteBusyUntil:0,...extra});
+  const result=run({densityKgM3:800});
+  assert.deepEqual(result.trips.map(t=>t.amount),[6,6,1]);
+  assert.deepEqual(result.trips.map(t=>t.cargoKg),[4800,4800,800]);
+  assert.equal(result.totalCargoKg,10400);
+  assert.deepEqual(run().trips.map(t=>t.amount),[10,3]);
+  assert.equal(run().totalCargoKg,null);
+  assert.equal(run({densityKgM3:500}).trips[0].amount,10);
+  assert.equal(run({densityKgM3:5001}).excluded.length,2);
+  for(const densityKgM3 of [0,-1,0.5,'800'])assert.throws(()=>run({densityKgM3}));
+});
+test('mass calculation excludes only trucks with missing or insufficient payload',()=>{
+  const loader={id:'l',name:'L',rate:100,operations:['snow_load']};
+  const truck={id:'t',name:'T',rate:100,bodyM3:10,operations:['snow_haul','snow_unload']};
+  const fleet=[loader,truck,{...truck,id:'u',payloadKg:7000}];
+  const p=calculateHaul({...shift,vehicleIds:['l','t','u']},fleet,{...options,fleetMode:'shift',densityKgM3:1000});
+  assert.deepEqual(p.excluded.map(v=>v.id),['t']);
+  assert.ok(p.trips.length);assert.ok(p.trips.every(t=>t.truckId==='u' && t.cargoKg<=7000));
+});
