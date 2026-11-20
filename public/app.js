@@ -187,9 +187,10 @@ function openOrder(edgeId){
 }
 const sampleRow={edgeId:'w31172948-2001790818-2003931756',operation:'patrol_plow',customer:'Учебный заказчик',executor:'Учебная служба',officer:'Учебный диспетчер',
   contractId:'DEMO-01',source:'Учебная адресная ведомость',clause:'Строка 1',reviewer:'Учебный проверяющий',from:'2026-01-01',until:'2027-01-01'};
+let registryAttachment=null;
 const sampleAttachment={mode:'simulation',networkVersion:'pkgo-27233df581c6',rows:[sampleRow,{...sampleRow,edgeId:'unmapped-demo',clause:'Строка 2'}]};
 $('attachment-save').onclick=()=>downloadOrder(sampleAttachment,'sever-training-scope.json');
-$('attachment-show').onclick=()=>{roadMap?.focus(sampleRow.edgeId);openOrder(sampleRow.edgeId);};
+$('attachment-show').onclick=()=>{registryAttachment=null;$('attachment-file').value='';roadMap?.focus(sampleRow.edgeId);openOrder(sampleRow.edgeId);};
 async function refreshOrder(action){
   if(orderEdge==null || !plan)return;
   const revision=++orderRevision;
@@ -206,7 +207,7 @@ async function refreshOrder(action){
     try{
       const file=$('attachment-file').files[0];
       if(file && file.size>64000)throw Error('Максимальный размер 64 КБ');
-      body.attachment=file?JSON.parse(await file.text()):sampleAttachment;
+      body.attachment=file?JSON.parse(await file.text()):(registryAttachment??sampleAttachment);
       if(revision!==orderRevision)return;
     }catch(error){if(revision===orderRevision)root.textContent='Проверьте JSON: '+error.message;return;}
   }
@@ -446,6 +447,7 @@ async function init() {
     tasks = new Map(data.tasks.map(task => [String(task.id),task]));
     populate(data.latest?.input);
     $('workspace').hidden = false;
+    initRegistry();
     roadMap = new RoadMap($('map'),data.network,pickColor,showRoad,data.tasks);
     syncDraft();
     $('status').textContent = '';
@@ -482,3 +484,103 @@ document.querySelector('.tabs').addEventListener('click',e => {
 });
 $('order-panel').addEventListener('change',()=>refreshOrder());
 init();
+
+function initRegistry(){
+  const panel=$('registry-panel');
+  if(globalThis.severDemo || !['localhost','127.0.0.1'].includes(location.hostname))return;
+  panel.hidden=false;
+  const versions=$('reg-version'), status=$('reg-status'), detail=$('reg-detail');
+  let opened=null,example=false,requestId=0;
+  const fields={contractId:'Номер договора',edgeId:'Идентификатор участка',objectType:'Тип объекта',jurisdiction:'Юрисдикция',owner:'Владелец',balanceHolder:'Балансодержатель',
+    customer:'Заказчик',executor:'Исполнитель',officer:'Ответственный за поручение',source:'Название документа',clause:'Лист или пункт приложения',reviewer:'Проверяющий',
+    operation:'Вид работ',from:'Действует с',until:'До начала дня'};
+  for(const [key,title] of Object.entries(fields)){
+    const label=add($('reg-fields'),'label',title);
+    const input=add(label,key==='operation'?'select':'input');input.id='reg-field-'+key;
+    if(key==='operation')for(const [value,name] of Object.entries(data.workTypes))input.add(new Option(name,value));
+    if(['from','until'].includes(key))input.type='date';
+  }
+  $('reg-edge').onclick=()=>{
+    const id=roadMap?.selected;
+    if(!id){status.textContent='Сначала нажмите на участок городской карты.';return;}
+    $('reg-field-edgeId').value=id;
+    status.textContent='Выбран участок '+(edges.get(id)?.name||id);
+  };
+  const modeName=mode=>mode==='simulation'?'Учебная запись':'Документ на проверке';
+  function controls(busy){
+    for(const el of panel.querySelectorAll('input,select,button'))el.disabled=busy;
+  }
+  async function list(selected=''){
+    const records=await api('/api/registry');
+    versions.replaceChildren(new Option('Новая запись',''),...records.map(r=>
+      new Option(r.contract_id+' · ред. '+r.revision+' · '+modeName(r.mode),JSON.stringify([r.contract_id,r.revision]))));
+    versions.value=selected;
+    await show();
+  }
+  async function show(){
+    const serial=++requestId;
+    opened=null;example=false;$('reg-manual').open=false;
+    for(const key of Object.keys(fields)){const input=$('reg-field-'+key);if(input.tagName==='SELECT')input.selectedIndex=0;else input.value='';}
+    $('reg-mode').value='simulation';
+    $('reg-file').value='';$('reg-pdf').value='';$('reg-url').value='';
+    detail.replaceChildren();status.textContent='';
+    if(!versions.value)return;
+    const [contract,revision]=JSON.parse(versions.value);
+    const query='?'+new URLSearchParams({contract,revision});
+    const record=await api('/api/registry/revision'+query);
+    if(serial!==requestId)return;
+    opened=record;
+    $('reg-url').value=record.source_url;
+    add(detail,'strong',modeName(record.mode)+' · '+record.contract_id+' · редакция '+record.revision);
+    add(detail,'p','Сохранена '+new Date(record.recorded_at).toLocaleString('ru-RU',{timeZone:'Asia/Kamchatka'})+' (Камчатка) · сеть '+record.network_version);
+    if(record.pdf_digest){
+      const link=add(detail,'a','Скачать сохранённый PDF');
+      link.href='/api/registry/document'+query;
+      add(detail,'p','SHA-256: '+record.pdf_digest);
+    }
+    for(const r of record.rows){
+      add(detail,'p',r.line+'. '+(r.mapped?(r.asset_name||'Без названия'):'Геометрия не найдена')+' · '+r.edge_id+' · '+(data.workTypes[r.operation]||r.operation)+' · '+r.date_from+' — '+r.date_until+' (до начала дня)');
+      add(detail,'p',r.object_type+' · юрисдикция: '+r.jurisdiction+' · владелец: '+r.owner+' · балансодержатель: '+r.balance_holder);
+      add(detail,'p','Заказчик: '+r.customer+' · исполнитель: '+r.executor+' · ответственный: '+r.officer+' · основание: '+r.source+', '+r.clause+' · проверяющий: '+r.reviewer);
+    }
+    const btn=add(detail,'button','Скачать строки редакции (JSON)','row-button');btn.type='button';
+    const schedule={mode:record.mode,networkVersion:record.network_version,rows:record.rows.map(r=>({
+      contractId:r.contract_id,edgeId:r.edge_id,objectType:r.object_type,jurisdiction:r.jurisdiction,owner:r.owner,balanceHolder:r.balance_holder,operation:r.operation,customer:r.customer,executor:r.executor,officer:r.officer,
+      source:r.source,clause:r.clause,reviewer:r.reviewer,from:r.date_from,until:r.date_until}))};
+    btn.onclick=()=>downloadOrder(schedule,'scope-revision-'+revision+'.json');
+    if(schedule.rows.length===1){
+      for(const key of Object.keys(fields))$('reg-field-'+key).value=schedule.rows[0][key]??'';
+      $('reg-mode').value=record.mode;
+    }
+    const mapped=record.rows.find(r=>r.mapped && edges.has(r.edge_id));
+    if(record.mode==='simulation' && mapped && record.network_version===data.network.version){
+      const use=add(detail,'button','Проверить учебный наряд по редакции','row-button');use.type='button';
+      use.onclick=()=>{registryAttachment=schedule;$('attachment-file').value='';$('order-case').value='attachment';roadMap.focus(mapped.edge_id);openOrder(mapped.edge_id);$('order-operation').value=mapped.operation;refreshOrder();};
+    }
+  }
+  function failure(error){status.textContent=error.message;}
+  panel.addEventListener('toggle',()=>{if(panel.open)list().catch(failure);});
+  versions.onchange=()=>show().catch(failure);
+  $('reg-example').onclick=()=>{example=true;$('reg-manual').open=false;$('reg-file').value='';status.textContent='Выбран учебный пример DEMO-01.';};
+  $('reg-file').onchange=()=>{example=false;$('reg-manual').open=false;status.textContent='';};
+  $('reg-save').onclick=async()=>{
+    controls(true);
+    try{
+      const json=$('reg-file').files[0],pdf=$('reg-pdf').files[0];
+      const manual=$('reg-manual').open;
+      if(manual && opened?.rows.length>1)throw Error('Для изменения многострочной редакции загрузите полный JSON.');
+      if(!manual && !json && !example)throw Error('Выберите JSON или подставьте учебный пример.');
+      if(json?.size>256*1024 || pdf?.size>12*1024*1024)throw Error('Допустимо до 256 КиБ JSON и 12 МиБ PDF.');
+      const file=manual?{mode:$('reg-mode').value,networkVersion:data.network.version,
+        rows:[Object.fromEntries(Object.keys(fields).map(k=>[k,$('reg-field-'+k).value.trim()]).filter(([,v])=>v))]}:
+        example?sampleAttachment:JSON.parse(await json.text());
+      if(versions.value && (!opened || opened.contract_id!==file.rows?.[0]?.contractId))throw Error('Выберите редакцию этого договора или новую запись.');
+      const pdfBase64=pdf?await new Promise((resolve,reject)=>{
+        const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=()=>reject(Error('Не удалось прочитать PDF'));reader.readAsDataURL(pdf);
+      }):undefined;
+      const record=await api('/api/registry',{file,pdfBase64,sourceUrl:$('reg-url').value.trim(),baseRevision:opened?.revision??0});
+      await list(JSON.stringify([record.contract_id,record.revision]));
+      status.textContent='Сохранена редакция '+record.revision+'.';
+    }catch(error){failure(error);}finally{controls(false);}
+  };
+}

@@ -39,6 +39,24 @@
         </section>
       </div>
       
+      <details class="panel page" id="registry-panel" hidden>
+        <summary>Реестр ответственности · документы и редакции</summary>
+        <p>Выберите сохранённую редакцию для просмотра или создайте первую. Каждое сохранение добавляет редакцию. Документы на проверке требуют решения уполномоченного лица.</p>
+        <label>Редакция <select id="reg-version"><option value="">Новая запись</option></select></label>
+        <div id="reg-detail"></div>
+        <details id="reg-manual"><summary>Ввести одну адресную строку вручную</summary>
+          <p>Выберите участок на городской карте. Чтобы подготовить редакцию из нескольких строк, загрузите JSON ниже.</p>
+          <label>Режим <select id="reg-mode"><option value="simulation">Учебная запись</option><option value="document_review">Документ на проверке</option></select></label>
+          <div id="reg-fields"></div>
+          <button type="button" id="reg-edge">Взять выбранный на карте участок</button>
+        </details>
+        <label>Адресные строки (JSON) <input id="reg-file" type="file" accept=".json"></label>
+        <button type="button" class="row-button" id="reg-example">Подставить учебный пример</button>
+        <label>Источник документа <input id="reg-url" type="url" placeholder="https://"></label>
+        <label>Приложение PDF (до 12 МиБ) <input id="reg-pdf" type="file" accept=".pdf"></label>
+        <button type="button" id="reg-save">Сохранить редакцию</button>
+        <p id="reg-status" aria-live="polite"></p>
+      </details>
       <details class="panel page" id="order-panel">
         <summary><strong>Учебный наряд · основания и приёмка</strong></summary>
         <p>Выберите участок на карте и нажмите «Проверить учебный наряд». Досье и документы в примере вымышлены. Пробный маршрут рассчитывается отдельно от смены. Журнал сохраняется в этом браузере.</p>
