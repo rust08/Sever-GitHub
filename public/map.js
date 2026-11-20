@@ -101,7 +101,7 @@ export class RoadMap {
       line.on('click',event=>{
         if(!this.onHaulPick){this.highlight(id);return;}
         const node=event.latlng.distanceTo(points[0])<=event.latlng.distanceTo(points.at(-1))?edge.from:edge.to;
-        this.onHaulPick(String(node),edge.name||'Без названия');
+        this.onHaulPick(String(node),edge.name||'Без названия',id);
       });
       this.bounds.extend(line.getBounds());
       const taskList=this.edgeTasks.get(id) || [];

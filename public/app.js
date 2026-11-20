@@ -84,8 +84,8 @@ function addVehicle(vehicle, active, open=false) {
     const label=add(ops,'label');const box=add(label,'input');box.type='checkbox';box.dataset.operation=key;
     box.checked=(vehicle.operations??['patrol_plow']).includes(key);label.append(document.createTextNode(title));
   }
-  for(const [key,title] of Object.entries({payloadKg:'Грузоподъёмность самосвала, кг',bodyM3:'Объём кузова самосвала, м³',widthM:'Ширина с оборудованием, м',massT:'Рабочая масса, т',maxGradePct:'Допустимый уклон, %'})){
-    const el=add(add(fields,'label',title),'input');el.dataset.field=key;el.type='number';el.step='any';el.min=key==='maxGradePct'?'0':'0.01';el.value=vehicle[key]??'';if(key==='payloadKg'){el.min='1';el.step='1';}if(key==='bodyM3'){el.min='1';el.step='1';el.max='1000';}
+  for(const [key,title] of Object.entries({tareKg:'Масса порожней машины, кг',payloadKg:'Грузоподъёмность самосвала, кг',bodyM3:'Объём кузова самосвала, м³',widthM:'Ширина с оборудованием, м',massT:'Рабочая масса, т',maxGradePct:'Допустимый уклон, %'})){
+    const el=add(add(fields,'label',title),'input');el.dataset.field=key;el.type='number';el.step='any';el.min=key==='maxGradePct'?'0':'0.01';el.value=vehicle[key]??'';if(key==='payloadKg'||key==='tareKg'){el.min='1';el.step='1';}if(key==='bodyM3'){el.min='1';el.step='1';el.max='1000';}
   }
   const remove=add(editor,'button','Удалить из парка','row-button');remove.type='button';
   remove.onclick=()=>{row.remove();markChanged();$('add-vehicle').focus();};
@@ -731,6 +731,40 @@ function initHaul(){
     if(roadMap)roadMap.onHaulPick=null;
     clearHaul();
   };
+  const limits=new Map();
+  let picked=null;
+  $('transit-pick').onclick=()=>{
+    if(!roadMap)return;
+    roadMap.setMode('priority');roadMap.highlight(null);
+    $('transit-status').textContent='Нажмите на дорогу.';
+    roadMap.onHaulPick=(node,name,id)=>{
+      roadMap.onHaulPick=null;picked={id,name};
+      $('transit-road').textContent=name+' · '+id;
+      for(const key of ['maxKg','widthM','gradePct','source'])$('transit-'+key).value=limits.get(id)?.[key]??'';
+      $('transit-status').textContent='';
+      $('transit-add').scrollIntoView({block:'center'});
+    };
+    mapBox.scrollIntoView({block:'center'});
+  };
+  function listLimits(){
+    const root=$('transit-list');root.replaceChildren();
+    for(const r of limits.values()){
+      const row=add(root,'p');
+      const values=[r.maxKg!=null?r.maxKg+' кг':'',r.widthM!=null?r.widthM+' м':'',r.gradePct!=null?r.gradePct+' %':''].filter(Boolean);
+      add(row,'span',r.name+' · '+values.join(', ')+' · '+r.source+' ');
+      const remove=add(row,'button','Снять');remove.type='button';remove.onclick=()=>{limits.delete(r.edgeId);listLimits();clearHaul();};
+    }
+  }
+  $('transit-add').onclick=()=>{
+    const source=$('transit-source').value.trim(),rule={};
+    for(const key of ['maxKg','widthM','gradePct']){
+      const el=$('transit-'+key);if(!el.reportValidity())return;
+      if(el.value!=='')rule[key]=el.valueAsNumber;
+    }
+    if(!picked || !source || !Object.keys(rule).length){$('transit-status').textContent='Выберите участок, укажите основание и хотя бы одно ограничение.';return;}
+    limits.set(picked.id,{...rule,edgeId:picked.id,name:picked.name,source});
+    $('transit-status').textContent='Ограничение применено.';listLimits();clearHaul();
+  };
   for(const key of ['loadNode','siteNode']){
     $('haul-'+key).onclick=()=>{
       if(!roadMap)return;
@@ -752,6 +786,7 @@ function initHaul(){
     const density=$('haul-density');
     if(density.value!=='')options.densityKgM3=density.valueAsNumber;
     Object.assign(options,{travelMode:travel.value},travel.value==='network'?haulPoints:{});
+    if(travel.value==='network')options.transitLimits=[...limits.values()];
     for(const [key] of fields)options[key]=$('haul-'+key).valueAsNumber;
     try{
       const result=await api('/api/haul/preview',{shift:plan.input,options});
@@ -760,13 +795,23 @@ function initHaul(){
       add(out,'p',result.totalCargoKg===null?'Плотность не задана. Масса груза не проверена.':'Расчётная масса вывоза: '+format(result.totalCargoKg,0)+' кг при '+format(result.densityKgM3,0)+' кг/м³.');
       for(const vehicle of result.excluded)add(out,'p',vehicle.name+' · '+vehicle.reason);
       if(result.paths){
-        for(const [direction,label] of [['outward','Туда'],['home','Обратно']]){
-          const path=result.paths[direction];
-          if(!path){add(out,'p',label+' · путь отсутствует');continue;}
-          const btn=add(out,'button',label+' · '+format(path.km,2)+' км · показать на карте','row-button');btn.type='button';
-          btn.onclick=()=>{roadMap.setMode('priority');roadMap.showHaul(haulPoints,result.paths,direction);mapBox.scrollIntoView({block:'center'});};
+        let shown=result.paths;
+        if(result.routeSets?.length>1){
+          const select=add(add(out,'label','Маршрут рейса'),'select');
+          result.trips.forEach((t,i)=>select.add(new Option((i+1)+' · '+t.truck+' · '+t.amount+' м³',t.routeIndex)));
+          select.onchange=()=>{shown=result.routeSets[Number(select.value)];drawDirections();};
         }
-        roadMap.showHaul(haulPoints,result.paths,'outward');
+        const directions=add(out,'div');
+        function drawDirections(){directions.replaceChildren();
+        for(const [direction,label] of [['outward','Туда'],['home','Обратно']]){
+          const path=shown[direction];
+          if(!path){add(directions,'p',label+' · путь отсутствует');continue;}
+          const btn=add(directions,'button',label+' · '+format(path.km,2)+' км · показать на карте','row-button');btn.type='button';
+          btn.onclick=()=>{roadMap.setMode('priority');roadMap.showHaul(haulPoints,shown,direction);mapBox.scrollIntoView({block:'center'});};
+        }
+        roadMap.showHaul(haulPoints,shown,'outward');
+        }
+        drawDirections();
       }
       if(result.reason)add(out,'p',result.reason);
       if(!result.trips.length)return;

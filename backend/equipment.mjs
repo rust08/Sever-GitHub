@@ -37,6 +37,10 @@ export function equipmentFields(v){
     if(!Number.isSafeInteger(v.payloadKg)||v.payloadKg<=0)throw Error('Укажите грузоподъёмность в целых положительных килограммах');
     result.payloadKg=v.payloadKg;
   }
+  if(v.tareKg!=null && v.tareKg!==''){
+    if(!Number.isSafeInteger(v.tareKg)||v.tareKg<=0)throw Error('Укажите массу порожней машины в целых кг');
+    result.tareKg=v.tareKg;
+  }
   return result;
 }
 export function resourceReason(v,input,operation){

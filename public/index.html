@@ -47,7 +47,14 @@
           <label>Путь <select id="haul-travel"><option value="manual">Время вручную</option><option value="network">По городской сети</option></select></label>
           <div id="haul-points" hidden><p>Нажмите кнопку, затем нужную дорогу. Точка привяжется к ближайшему из двух концов участка.</p>
           <button type="button" id="haul-loadNode">Выбрать погрузку</button> <span id="haul-loadNode-label"></span>
-          <button type="button" id="haul-siteNode">Выбрать площадку</button> <span id="haul-siteNode-label"></span></div>
+          <button type="button" id="haul-siteNode">Выбрать площадку</button> <span id="haul-siteNode-label"></span>
+          <details><summary>Ограничения транзитных участков</summary><p>Сценарные ограничения действуют в обоих направлениях до перезагрузки страницы.</p>
+          <button type="button" id="transit-pick">Выбрать участок ограничения</button><span id="transit-road"></span>
+          <label>Допустимая полная масса, кг <input type="number" id="transit-maxKg" min="1"></label>
+          <label>Доступная ширина, м <input type="number" id="transit-widthM" min="0.01" step="any"></label>
+          <label>Уклон, % <input type="number" id="transit-gradePct" min="0" step="any"></label>
+          <label>Основание или учебное допущение <input id="transit-source" maxlength="240"></label>
+          <button type="button" id="transit-add">Применить к участку</button><p id="transit-status" aria-live="polite"></p><div id="transit-list"></div></details></div>
           <div class="fleet-fields" id="haul-fields"></div>
           <label>Плотность вывозимого снега, кг/м³ (пусто — расчёт только по объёму)<input id="haul-density" type="number" min="1" step="1" placeholder="По замеру или учебному сценарию"></label>
           <label><input id="haul-permit" type="checkbox"> Предположить допуск площадки к приёму этого снега в учебном сценарии</label>

@@ -68,3 +68,20 @@ test('mass calculation excludes only trucks with missing or insufficient payload
   assert.deepEqual(p.excluded.map(v=>v.id),['t']);
   assert.ok(p.trips.length);assert.ok(p.trips.every(t=>t.truckId==='u' && t.cargoKg<=7000));
 });
+
+test('loaded outbound detours, empty return and light final load use the restricted short road',()=>{
+  const network={nodes:{a:[0,0],b:[1,0],c:[0,1]},edges:[
+    {id:'bridge',from:'a',to:'b',km:1},{id:'detour1',from:'a',to:'c',km:2},{id:'detour2',from:'c',to:'b',km:2}]};
+  const params={...options,travelMode:'network',loadNode:'a',siteNode:'b',volume:12,siteBusyUntil:0,densityKgM3:500,
+    transitLimits:[{edgeId:'bridge',maxKg:9000,source:'Учебная схема'}]};
+  const run=(closed=[],changes={})=>calculateHaul({...shift,closed},[],{...params,...changes},network);
+  const p=run(),first=p.routeSets[p.trips[0].routeIndex],last=p.routeSets[p.trips.at(-1).routeIndex];
+  assert.deepEqual(first.outward.edges,['detour1','detour2']);assert.deepEqual(first.home.edges,['bridge']);
+  assert.deepEqual(last.outward.edges,['bridge']);assert.equal(p.trips[0].arrive-p.trips[0].depart,12);
+  const partial=run(['detour1']);assert.equal(partial.delivered,12);assert.ok(partial.trips.every(t=>t.amount<=2));
+  assert.equal(run(['detour1'],{densityKgM3:null}).delivered,0);
+  for(const rule of [{widthM:2},{gradePct:9},{maxKg:7999}]){
+    assert.equal(run(['detour1'],{transitLimits:[{edgeId:'bridge',source:'Учебная схема',...rule}]}).delivered,0);
+  }
+  assert.throws(()=>run([],{transitLimits:[{edgeId:'other',maxKg:8000,source:'test'}]}));
+});
