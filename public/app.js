@@ -84,8 +84,8 @@ function addVehicle(vehicle, active, open=false) {
     const label=add(ops,'label');const box=add(label,'input');box.type='checkbox';box.dataset.operation=key;
     box.checked=(vehicle.operations??['patrol_plow']).includes(key);label.append(document.createTextNode(title));
   }
-  for(const [key,title] of Object.entries({widthM:'Ширина с оборудованием, м',massT:'Рабочая масса, т',maxGradePct:'Допустимый уклон, %'})){
-    const el=add(add(fields,'label',title),'input');el.dataset.field=key;el.type='number';el.step='any';el.min=key==='maxGradePct'?'0':'0.01';el.value=vehicle[key]??'';
+  for(const [key,title] of Object.entries({bodyM3:'Объём кузова самосвала, м³',widthM:'Ширина с оборудованием, м',massT:'Рабочая масса, т',maxGradePct:'Допустимый уклон, %'})){
+    const el=add(add(fields,'label',title),'input');el.dataset.field=key;el.type='number';el.step='any';el.min=key==='maxGradePct'?'0':'0.01';el.value=vehicle[key]??'';if(key==='bodyM3'){el.min='1';el.step='1';el.max='1000';}
   }
   const remove=add(editor,'button','Удалить из парка','row-button');remove.type='button';
   remove.onclick=()=>{row.remove();markChanged();$('add-vehicle').focus();};
@@ -360,7 +360,7 @@ async function calculate() {
   finally {saving = false; $('settings').inert = false; $('submit').disabled = false;if(roadMap?.selected!=null)showRoad(roadMap.selected);}
 }
 function renderPlan(next) {
-  plan = next;
+  plan = next;clearHaul();
   $('shift-date').textContent = new Intl.DateTimeFormat('ru-RU', {day:'numeric',month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(plan.input.date+'T00:00:00Z'));
   const ranked = new Map((plan.result.priorities || []).map(t => [String(t.id),t]));
   tasks = new Map(data.tasks.map(t => [String(t.id), {...t,...ranked.get(String(t.id))}]));
@@ -705,3 +705,39 @@ function initEquipmentObservations(){
   select.onchange=show;show();
 }
 initEquipmentObservations();
+
+let haulRevision=0;
+function clearHaul(){haulRevision++;$('haul-result').replaceChildren();}
+function initHaul(){
+  const fields=[
+    ['volume','Снег к вывозу, м³',60,1,1000000],['siteCapacity','Свободная вместимость площадки, м³',60,0,1000000],
+    ['loadRate','Производительность погрузчика, м³/ч',60,1,6000],['driveMin','Путь в одну сторону, мин',15,1,1440],
+    ['unloadMin','Разгрузка одного рейса, мин',10,1,1440],['siteBusyUntil','Через сколько минут от начала смены освободится пост',0,0,1440]
+  ];
+  for(const [key,title,value,min,max] of fields){
+    const input=add(add($('haul-fields'),'label',title),'input');
+    Object.assign(input,{id:'haul-'+key,type:'number',value,min,max,step:1,required:true});
+  }
+  const form=$('haul-form');form.oninput=clearHaul;
+  form.onsubmit=async e=>{
+    e.preventDefault();clearHaul();
+    const revision=haulRevision,out=$('haul-result');
+    if(!plan){add(out,'p','Сначала рассчитайте смену.');return;}
+    const options={fleetMode:$('haul-fleet').value,sitePermitted:$('haul-permit').checked};
+    for(const [key] of fields)options[key]=$('haul-'+key).valueAsNumber;
+    try{
+      const result=await api('/api/haul/preview',{shift:plan.input,options});
+      if(revision!==haulRevision)return;
+      add(out,'strong','Вывоз по плану: '+result.delivered+' м³ · остаток '+result.remaining+' м³ · '+money(result.cost));
+      if(result.reason)add(out,'p',result.reason);
+      if(!result.trips.length)return;
+      add(out,'p',result.loader+' · время Камчатки. В стоимости учтены погрузка и занятость самосвала от начала погрузки до возврата, включая ожидание.');
+      const body=table(out,['Самосвал','м³','Погрузка','Прибытие','Очередь, мин','Разгрузка','Возврат','Стоимость']);
+      for(const t of result.trips){
+        const row=add(body,'tr');
+        for(const v of [t.truck,t.amount,clock(t.start)+'–'+clock(t.depart),clock(t.arrive),t.wait,clock(t.unload)+'–'+clock(t.finish),clock(t.back),money(t.cents/100)])add(row,'td',String(v));
+      }
+    }catch(error){if(revision===haulRevision)add(out,'p',error.message);}
+  };
+}
+initHaul();

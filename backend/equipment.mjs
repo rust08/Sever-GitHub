@@ -29,6 +29,10 @@ export function equipmentFields(v){
     if(!Number.isFinite(v[key])||v[key]<0||(key!=='maxGradePct' && !v[key]))throw Error('Проверьте габариты, массу и допустимый уклон машины');
     result[key]=v[key];
   }
+  if(v.bodyM3!=null && v.bodyM3!==''){
+    if(!Number.isSafeInteger(v.bodyM3)||v.bodyM3<=0||v.bodyM3>1000)throw Error('Проверьте объём кузова: 1–1000 м³');
+    result.bodyM3=v.bodyM3;
+  }
   return result;
 }
 export function resourceReason(v,input,operation){

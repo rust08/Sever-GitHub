@@ -1,3 +1,4 @@
+import {calculateHaul} from './haul.mjs';
 import {equipmentFields,resourceReason} from './equipment.mjs';
 import {previewOrder} from './order-preview.mjs';
 import {workTypes} from './governance.mjs';
@@ -114,7 +115,12 @@ export function evaluateOrder(data,body) {
   const input=validate(body.shift,data);
   try{return previewOrder(data,input,body)}catch(error){throw new InputError(error.message)}
 }
+export function evaluateHaul(data,body){
+  const input=validate(body?.shift,data);
+  try{return calculateHaul(input,input.fleet??data.fleet,body.options);}catch(e){throw new InputError(e.message);}
+}
 export async function api(db,method,path,body,data) {
+  if(method==='POST' && path==='/api/haul/preview')return evaluateHaul(data,body);
   if(method==='POST' && path==='/api/orders/preview')return evaluateOrder(data,body);
   if (method==='GET' && path==='/api/data') {
     const [latest]=await db.rows('SELECT id,input_json,result_json FROM city_plans WHERE network_version=? ORDER BY seq DESC LIMIT 1',[data.network.version]);

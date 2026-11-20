@@ -40,6 +40,16 @@
         </section>
       </div>
       
+      <details class="panel page" id="haul-panel"><summary>Вывоз снега · учебный расчёт рейсов</summary>
+        <p>Одна точка погрузки и один пост разгрузки. Расчёт использует длительность и бюджет сохранённой смены отдельно от городского плана. Машины начинают у места погрузки и возвращаются туда. Время пути задаёт диспетчер.</p>
+        <form id="haul-form">
+          <label>Техника <select id="haul-fleet"><option value="sample">Пример: погрузчик и два самосвала</option><option value="shift">Выбранные машины сохранённой смены</option></select></label>
+          <div class="fleet-fields" id="haul-fields"></div>
+          <label><input id="haul-permit" type="checkbox"> Предположить допуск площадки к приёму этого снега в учебном сценарии</label>
+          <button type="submit">Рассчитать рейсы</button>
+        </form>
+        <div id="haul-result" aria-live="polite"></div>
+      </details>
       <details class="panel page" id="fleet-evidence"><summary>Свидетельства о технике и ресурсах</summary>
         <p>Публикации из исследования от 20 ноября 2026 года. Доступность конкретной машины задаётся в карточке смены.</p>
         <label>Сообщение <select id="equipment-observation"></select></label><div id="equipment-source"></div>
