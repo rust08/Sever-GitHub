@@ -29,6 +29,13 @@
       "breakpoints": true,
       "idx": 3,
       "version": "6"
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1795345600000,
+      "tag": "0004_registry_worksite",
+      "breakpoints": true
     }
   ]
 }

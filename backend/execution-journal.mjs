@@ -29,11 +29,36 @@ function record(db,id,seq,type,role,at,comment,key,signature){
     .run(id,seq,type,actors[role],role,at,new Date().toISOString(),comment,key,signature);
   if(role==='inspector'||role==='customer') db.prepare('INSERT INTO work_order_reviews VALUES (?,?)').run(id,seq);
 }
+// Resolve the latest edition before filtering rows, just as the coverage map does.
+function resolveScope(db,ref,networkVersion,edgeId,operation,date){
+  const rows=db.prepare(`WITH latest AS (
+    SELECT contract_id,MAX(revision) AS revision FROM responsibility_revisions GROUP BY contract_id
+  )
+  SELECT s.*,w.limits_json,r.recorded_at FROM latest
+    JOIN responsibility_revisions r USING(contract_id,revision)
+    JOIN responsibility_scope_rows s USING(contract_id,revision)
+    LEFT JOIN responsibility_worksites w USING(contract_id,revision,line)
+    WHERE r.mode='simulation' AND r.network_version=? AND s.mapped=1 AND s.edge_id=?
+      AND s.operation=? AND s.date_from<=? AND ?<s.date_until LIMIT 2`).all(networkVersion,edgeId,operation,date,date);
+  requireThat(rows.length===1,422,rows.length?'Пересекаются учебные основания':'Нет действующей учебной строки на участок и операцию');
+  const [row]=rows;
+  requireThat(row.contract_id===ref.contractId && row.revision===ref.revision && row.line===ref.line,409,'Выбранная строка или редакция изменилась');
+  requireThat(row.executor==='Учебный подрядчик',422,'Строка закреплена за другим исполнителем симулятора');
+  return row;
+}
 function create(db,data,body,key,role){
   requireThat(role==='dispatcher',403,'Создание доступно учебному диспетчеру');
   const {shiftId,edgeId,vehicleId,operation,reverse=false}=body;
   requireThat([shiftId,edgeId,vehicleId,operation].every(v=>typeof v==='string'&&v.length>0&&v.length<=240)&&typeof reverse==='boolean',400,'Проверьте смену, участок, направление, операцию и машину');
-  const signature=JSON.stringify([shiftId,edgeId,reverse,vehicleId,operation]);
+  const ref=body.registryRef;
+  const identity=[shiftId,edgeId,reverse,vehicleId,operation];
+  if(ref!==undefined){
+    requireThat(ref && typeof ref.contractId==='string' && ref.contractId.length>0 && ref.contractId.length<=240 &&
+      Number.isSafeInteger(ref.revision) && ref.revision>0 && Number.isSafeInteger(ref.line) && ref.line>0 &&
+      Object.keys(ref).length===3,400,'Нужны договор, номер редакции и строка');
+    identity.push(ref.contractId,ref.revision,ref.line);
+  }
+  const signature=JSON.stringify(identity);
   const existing=db.prepare('SELECT id,creation_request FROM work_orders WHERE creation_key=?').get(key);
   if(existing){
     requireThat(existing.creation_request===signature,409,'Ключ создания уже использован');
@@ -42,12 +67,27 @@ function create(db,data,body,key,role){
   const saved=db.prepare('SELECT input_json FROM city_plans WHERE id=? AND network_version=?').get(shiftId,data.network.version);
   requireThat(saved,404,'Сохранённая смена для текущей сети не найдена');
   const shift=JSON.parse(saved.input_json);
-  const p=evaluateOrder(data,{shift,shiftId,edgeId,operation,vehicleId,reverse,scenario:'example',history:[],withEvent:true});
+  const row=ref && resolveScope(db,ref,data.network.version,edgeId,operation,shift.date);
+  const worksite=JSON.parse(row?.limits_json??'{}');
+  const attachment=row && {mode:'simulation',networkVersion:data.network.version,rows:[{
+    contractId:row.contract_id,edgeId,operation,from:row.date_from,until:row.date_until,customer:row.customer,
+    executor:row.executor,officer:row.officer,source:row.source,clause:row.clause,reviewer:row.reviewer
+  }]};
+  const p=evaluateOrder(data,{shift,shiftId,edgeId,operation,vehicleId,reverse,worksite,attachment,
+    scenario:row?'attachment':'example',history:[],withEvent:true});
+  requireThat(operation==='patrol_plow',422,'Серверный наряд поддерживает патрульную расчистку');
+  requireThat(p.mandate.status==='eligible',422,[...p.mandate.conflicts,...p.mandate.missing].join('. '));
   requireThat(p.mandate.status==='eligible' && p.routing?.assigned && !shift.closed?.includes(edgeId),422,'Нет допуска или доступного маршрута');
+  if(row){
+    const workEnd=Date.parse(shift.date+'T'+shift.start+':00+12:00')+p.routing.workEndMin*60000;
+    requireThat(workEnd<=Date.parse(p.contract.end),422,'Плановый проход заканчивается после срока действия строки');
+  }
   const task=JSON.stringify([shiftId,edgeId,reverse,operation]);
   requireThat(!db.prepare('SELECT id FROM work_orders WHERE task_key=?').get(task),409,'На это задание уже создан наряд');
   const snapshot={networkVersion:data.network.version,edgeId,reverse,vehicleId,operation,assignee:actors.executor,
-    scenario:'example',basis:'Учебный образец v1',contract:p.contract,rule:p.rule,clock:p.clock,
+    scenario:row?'registry':'example',basis:row?row.source:'Учебный образец v1',
+    ...(row?{registryRef:ref,registryRecordedAt:row.recorded_at,shiftDate:shift.date,worksite,
+      responsibility:p.responsibility,owner:row.owner,balanceHolder:row.balance_holder}:{}),contract:p.contract,rule:p.rule,clock:p.clock,
     shiftStart:new Date(Date.parse(shift.date+'T'+shift.start+':00+12:00')).toISOString(),shiftMinutes:shift.shiftMin,routing:p.routing};
   const id=randomUUID();
   db.prepare('INSERT INTO work_orders VALUES (?,?,?,?,?,?)').run(id,shiftId,JSON.stringify(snapshot),key,signature,task);
@@ -71,6 +111,12 @@ function advance(db,id,body,key,role){
   requireThat(order.next[type]===role,403,'Действие недоступно этой учебной роли');
   requireThat(role!=='executor'||order.snapshot.assignee===actors[role],403,'Наряд назначен другому исполнителю');
   requireThat(utc>=order.events.at(-1).occurred_at,400,'Событие раньше предыдущего');
+  if(type==='issued' && order.snapshot.registryRef){
+    const s=order.snapshot;
+    resolveScope(db,s.registryRef,s.networkVersion,s.edgeId,s.operation,s.shiftDate);
+    requireThat(Date.parse(utc)<Date.parse(s.contract.end),422,'К моменту выдачи срок учебной строки истёк');
+  }
+  if(type==='cancelled') db.prepare('UPDATE work_orders SET task_key=? WHERE id=?').run('cancelled:'+id,id);
   record(db,id,version+1,type,role,utc,comment,key,signature);
   return id;
 }
@@ -95,7 +141,7 @@ export async function journalResponse(request,db,data){
     requireThat(Object.hasOwn(actors,role),403,'Требуется учебная роль локального стенда');
     const body=await request.json().catch(()=>null);
     requireThat(body && typeof body==='object' && !Array.isArray(body),400,'Требуется объект JSON');
-    const allowed=match[1]?['expected_version','event_type','occurred_at','comment']:['shiftId','edgeId','vehicleId','operation','reverse'];
+    const allowed=match[1]?['expected_version','event_type','occurred_at','comment']:['shiftId','edgeId','vehicleId','operation','reverse','registryRef'];
     requireThat(Object.keys(body).every(k=>allowed.includes(k)),400,'Неизвестное поле запроса');
     const key=request.headers.get('idempotency-key');
     requireThat(key && /^[A-Za-z0-9_-]{1,100}$/.test(key),400,'Требуется Idempotency-Key');

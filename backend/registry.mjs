@@ -17,6 +17,12 @@ function saveRevision(db,network,body){
   const contract=file.rows[0]?.contractId;
   const fields=['edgeId','customer','executor','officer','contractId','source','clause','reviewer'];
   for(const [i,row] of file.rows.entries()){
+    if(row?.worksite!==undefined){
+      const limits=row.worksite;
+      if(!limits || typeof limits!=='object' || Array.isArray(limits) || Object.entries(limits).some(([key,value])=>
+        !['clearWidthM','maxMassT','gradePct'].includes(key) || !Number.isFinite(value) || (key==='gradePct'?value<0:value<=0)))
+        fail('Проверьте ограничения участка в строке '+(i+1));
+    }
     const assetFields=['objectType','jurisdiction','owner','balanceHolder'];
     if(row && assetFields.some(k=>(file.mode==='document_review' || row[k]!==undefined) && !validText(row[k])))fail('Укажите тип объекта, юрисдикцию, владельца и балансодержателя в строке '+(i+1));
     if(!row || fields.some(k=>!validText(row[k])) || row.contractId!==contract || !Object.hasOwn(workTypes,row.operation) ||
@@ -49,6 +55,8 @@ function saveRevision(db,network,body){
       }
       insert.run(contract,revision,i+1,row.edgeId,edge?.name??null,Number(Boolean(edge)),row.operation,row.customer,row.executor,
         row.officer,row.source,row.clause,row.reviewer,row.from,row.until,row.objectType??'не указан',row.jurisdiction??'не указана',row.owner??'не указан',row.balanceHolder??'не указан');
+      if(row.worksite && Object.keys(row.worksite).length)
+        db.prepare('INSERT INTO responsibility_worksites VALUES(?,?,?,?)').run(contract,revision,i+1,JSON.stringify(row.worksite));
     });
     db.exec('COMMIT');return {contract_id:contract,revision};
   }catch(e){db.exec('ROLLBACK');throw e;}
@@ -106,7 +114,10 @@ export async function registryResponse(request,db,network){
       return new Response(content,{headers:{'Content-Type':'application/pdf','Content-Disposition':'attachment; filename="scope.pdf"','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
     }
     if(url.pathname!=='/api/registry/revision')return json({error:'Ресурс не найден'},404);
-    const rows=db.prepare('SELECT * FROM responsibility_scope_rows WHERE contract_id=? AND revision=? ORDER BY line').all(contract,revision);
+    const rows=db.prepare(`SELECT s.*,w.limits_json FROM responsibility_scope_rows s
+      LEFT JOIN responsibility_worksites w USING(contract_id,revision,line)
+      WHERE s.contract_id=? AND s.revision=? ORDER BY line`).all(contract,revision)
+      .map(({limits_json,...row})=>limits_json?{...row,worksite:JSON.parse(limits_json)}:row);
     return json({...record,rows});
   }catch(e){if(e instanceof RegistryError)return json({error:e.message},e.status);throw e;}
 }
