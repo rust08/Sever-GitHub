@@ -36,7 +36,7 @@ function transitRoutes(network,input,options,base,density){
   return path;
 }
 
-export function calculateHaul(input,shiftFleet,options,network){
+export function calculateHaul(input,shiftFleet,options,network,readyAt=new Map()){
   if(!options || !['sample','shift'].includes(options.fleetMode) || typeof options.sitePermitted!=='boolean')throw Error('Укажите парк и статус учебной площадки');
   const {volume,siteCapacity,loadRate,driveMin,unloadMin,siteBusyUntil}=options;
   const density=options.densityKgM3??null;
@@ -62,9 +62,9 @@ export function calculateHaul(input,shiftFleet,options,network){
   });
   const loader=fleet.filter(v=>!resourceReason(v,input,'snow_load'))
     .sort((a,b)=>Number(haulers.includes(a))-Number(haulers.includes(b)) || a.rate-b.rate)[0];
-  const trucks=haulers.filter(v=>v.id!==loader?.id).map(vehicle=>({vehicle,ready:0,capacity:density===null?vehicle.bodyM3:Math.min(vehicle.bodyM3,Math.floor(vehicle.payloadKg/density))}));
+  const trucks=haulers.filter(v=>v.id!==loader?.id).map(vehicle=>({vehicle,ready:readyAt.get(vehicle.id)??0,capacity:density===null?vehicle.bodyM3:Math.min(vehicle.bodyM3,Math.floor(vehicle.payloadKg/density))}));
   const trips=[],budget=Math.round(input.budget*100);
-  let delivered=0,spent=0,loaderFree=0,siteFree=siteBusyUntil,reason='';
+  let delivered=0,spent=0,loaderFree=readyAt.get(loader?.id)??0,siteFree=siteBusyUntil,reason='';
   if(!options.sitePermitted)reason='Для площадки не задан учебный допуск';
   else if(!loader)reason='Нет доступного погрузчика с операцией погрузки';
   else if(!trucks.length && excluded.length)reason='Нет отдельного самосвала с достаточной указанной грузоподъёмностью';
@@ -111,5 +111,5 @@ export function calculateHaul(input,shiftFleet,options,network){
     }
     trips.push({...timing,routeIndex,cargoKg:density===null?null:trip.amount*density,truck:truck.vehicle.name,truckId:truck.vehicle.id,wait:trip.unload-trip.arrive});
   }
-  return {mode:'simulation',fleetMode:options.fleetMode,densityKgM3:density,excluded,totalCargoKg:density===null?null:density*delivered,loader:loader?.name,delivered,remaining:volume-delivered,cost:spent/100,reason,trips,paths:restrictedPath?(routeSets[0]??null):paths,routeSets};
+  return {mode:'simulation',fleetMode:options.fleetMode,densityKgM3:density,excluded,totalCargoKg:density===null?null:density*delivered,loader:loader?.name,loaderId:loader?.id,delivered,remaining:volume-delivered,cost:spent/100,reason,trips,paths:restrictedPath?(routeSets[0]??null):paths,routeSets};
 }

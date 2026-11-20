@@ -1,3 +1,4 @@
+import {combineShift} from './unified-shift.mjs';
 import {calculateHaul} from './haul.mjs';
 import {equipmentFields,resourceReason} from './equipment.mjs';
 import {previewOrder} from './order-preview.mjs';
@@ -120,6 +121,19 @@ export function evaluateHaul(data,body){
   try{return calculateHaul(input,input.fleet??data.fleet,body.options,data.network);}catch(e){throw new InputError(e.message);}
 }
 export async function api(db,method,path,body,data) {
+  if(method==='POST' && path==='/api/unified-shifts/preview'){
+    const input=validate(body?.shift,data);
+    const options=body.options;
+    ensure(options?.travelMode==='network' && options.fleetMode==='shift','Нужны городской маршрут и парк этой смены');
+    ensure(Number.isSafeInteger(options.densityKgM3) && options.densityKgM3>0,'Укажите плотность снега в кг/м³');
+    const limits=options.transitLimits??[];
+    ensure(Array.isArray(limits),'Проверьте ограничения транзита');
+    // The plow solver has one shared graph. Close constrained roads conservatively.
+    const plowClosed=[...new Set([...input.closed,...limits.map(rule=>rule?.edgeId)])];
+    const clearing=calculateShift(data,{...input,closed:plowClosed}).result;
+    try{return combineShift(data,input,clearing,options,plowClosed);}
+    catch(error){throw new InputError(error.message);}
+  }
   if(method==='POST' && path==='/api/haul/preview')return evaluateHaul(data,body);
   if(method==='POST' && path==='/api/orders/preview')return evaluateOrder(data,body);
   if (method==='GET' && path==='/api/data') {
