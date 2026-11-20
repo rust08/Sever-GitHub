@@ -1,4 +1,4 @@
-import {assessMandate,assessClock,workTypes,recordStep,workflow} from './governance.mjs';
+import {assessMandate,trainingClock,workTypes,recordStep,workflow} from './governance.mjs';
 import {passesForEdge} from './policy.mjs';
 import {plan} from './planner.mjs';
 
@@ -60,10 +60,19 @@ export function previewOrder(data,input,request) {
     mandate.status=attachment.matchCount?'blocked':'manual_review';
     (attachment.matchCount?mandate.conflicts:mandate.missing).push(attachment.matchCount?'Несколько действующих строк на один участок и операцию':'Нет строки на выбранный участок, операцию и дату');
   }
-  const rule=known?{...doc,version:'учебная-1',clause:'Образец, пункт А',territory:'demo',legalClass:asset.legalClass,
-    operation:'patrol_plow',clockStart:'snowfall_end',minutes:120}:null;
-  const event=known&&request.withEvent===true?{...doc,id:'пример-окончания-снегопада',assetId:edge.id,kind:'snowfall_end',at:new Date(Date.parse(at)+offset*60000).toISOString()}:null;
-  const clock=assessClock({asset,operation,rule,event});
+  const {objectType='roadway',queue=1,eventKind='snowfall_end',repeatOffsetMin}=request;
+  if(!['roadway','sidewalk'].includes(objectType) || ![1,2].includes(queue) || !['snowfall_end','ice_detected'].includes(eventKind))
+    throw Error('Проверьте учебный паспорт и тип события');
+  if(repeatOffsetMin!=null && (request.withEvent!==true || !Number.isInteger(repeatOffsetMin) || repeatOffsetMin<=offset || repeatOffsetMin>input.shiftMin))
+    throw Error('Повторное событие должно быть позже первого и попадать в смену');
+  if(known)Object.assign(asset,{objectType,queue});
+  const stamps=repeatOffsetMin==null?[offset]:[offset,repeatOffsetMin];
+  const episodes=stamps.map(minutes=>{
+    const timestamp=new Date(Date.parse(at)+minutes*60000).toISOString();
+    const event=known && request.withEvent===true?{...doc,id:JSON.stringify([edge.id,eventKind,timestamp]),assetId:edge.id,kind:eventKind,at:timestamp}:null;
+    return trainingClock(asset,operation,event,at);
+  });
+  const {rule,event,clock}=episodes[0];
   let routing=null;
   if(mandate.status==='eligible'){
     const pass=passesForEdge(edge,true).find(p=>p.reverse===Boolean(request.reverse));
@@ -78,6 +87,7 @@ export function previewOrder(data,input,request) {
   // Preserve saved journals for the original first-machine, zero-offset scenario.
   if(machine.id!==vehicles[0].id || offset)identity.push(machine.id,offset);
   if(attachment?.matchCount===1)identity.push(contract,responsibility.officer);
+  if(objectType!=='roadway' || queue!==1 || eventKind!=='snowfall_end' || repeatOffsetMin!=null)identity.push(objectType,queue,eventKind,repeatOffsetMin??null);
   const id=JSON.stringify(identity);
   const order={id,dispatchable:routing?.assigned===true};
   let history=[];
@@ -86,6 +96,6 @@ export function previewOrder(data,input,request) {
   const state=history.at(-1)?.state??'planned';
   const actions=order.dispatchable?Object.entries(workflow[state]).map(([state,role])=>({state,role})):[];
   return {mode:'simulation',id,state,history,actions,mandate,clock,routing,asset,responsibility:attachment && attachment.matchCount!==1?null:responsibility,
-    contract:attachment && attachment.matchCount!==1?null:contract,operation,resource:attachment && attachment.matchCount!==1?null:resource,rule,event,attachment};
+    contract:attachment && attachment.matchCount!==1?null:contract,operation,resource:attachment && attachment.matchCount!==1?null:resource,rule,event,episodes,attachment};
 }
 

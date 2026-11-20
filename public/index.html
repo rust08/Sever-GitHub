@@ -66,8 +66,12 @@
         <label>Машина из смены <select id="order-vehicle"></select></label>
         <label>Операция <select id="order-operation"></select></label>
         <label>Направление <select id="order-direction"></select></label>
-        <label><input type="checkbox" id="order-event"> Смоделировать подтверждённое окончание снегопада</label>
-        <label>Через сколько минут после начала смены закончился снегопад <input type="number" id="order-offset" min="0" step="1" value="0" disabled></label>
+        <label>Тип объекта в учебном паспорте <select id="clock-object"><option value="roadway">Проезжая часть</option><option value="sidewalk">Тротуар</option></select></label>
+        <label>Очередь содержания <select id="clock-queue"><option value="1">Первая</option><option value="2">Вторая</option></select></label>
+        <label><input type="checkbox" id="order-event"> Задать учебное погодное событие</label>
+        <label>Событие <select id="clock-kind"><option value="snowfall_end">Окончание снегопада</option><option value="ice_detected">Обнаружение скользкости</option></select></label>
+        <label>Через сколько минут после начала смены произошло событие <input type="number" id="order-offset" min="0" step="1" value="0" disabled></label>
+        <label>Повторное событие того же вида, минут от начала смены (необязательно) <input type="number" min="1" step="1" id="clock-repeat" disabled></label>
         <div id="order-output" aria-live="polite"></div>
       </details>
       <section class="panel detail-panel" id="shift-details">

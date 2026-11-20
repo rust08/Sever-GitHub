@@ -106,3 +106,20 @@ test('ambiguous scope blocks dispatch and a malformed dossier cannot start a rou
   for(const change of [{networkVersion:'other'},{mode:'verified'}])
     await assert.rejects(scopePreview([],{attachment:{mode:'simulation',networkVersion:'unit',rows:[scopeRow],...change}}));
 });
+
+test('two episodes select their own rule across the Kamchatka revision boundary',async()=>{
+  const p=await preview({shift:{...shift,date:'2026-11-30',start:'23:50'},withEvent:true,repeatOffsetMin:10});
+  assert.deepEqual(p.episodes.map(e=>e.rule.minutes),[120,90]);
+  assert.deepEqual(p.episodes.map(e=>e.clock.dueAt),['2026-11-30T13:50:00.000Z','2026-11-30T13:30:00.000Z']);
+  assert.notEqual(p.episodes[0].event.id,p.episodes[1].event.id);
+  await assert.rejects(preview({withEvent:true,eventOffsetMin:15,repeatOffsetMin:15}));
+  await assert.rejects(preview({repeatOffsetMin:5}));
+});
+test('clock requires the right source event, passport, queue and effective edition',async()=>{
+  const ice={operation:'anti_icing',eventKind:'ice_detected',withEvent:true};
+  const p=await preview(ice);assert.equal(p.rule.minutes,60);assert.ok(p.clock.dueAt);assert.equal(p.routing,null);
+  assert.equal((await preview({...ice,eventKind:'snowfall_end'})).clock.status,'clock_unknown');
+  assert.equal((await preview({...ice,queue:2})).clock.status,'needs_review');
+  assert.equal((await preview({operation:'sidewalk',queue:2,objectType:'sidewalk',withEvent:true})).rule.minutes,240);
+  assert.equal((await preview({...ice,shift:{...shift,date:'2028-01-01'}})).clock.status,'needs_review');
+});

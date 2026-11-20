@@ -196,12 +196,18 @@ async function refreshOrder(action){
   const revision=++orderRevision;
   const offset=$('order-offset'), vehicle=$('order-vehicle');
   offset.disabled=!$('order-event').checked;
+  const repeat=$('clock-repeat');
+  repeat.disabled=offset.disabled;repeat.min=String(Number(offset.value)+1);repeat.max=plan.input.shiftMin;
+  $('clock-kind').disabled=offset.disabled;
   const root=$('order-output');root.replaceChildren();
+  if(!repeat.disabled && !repeat.checkValidity()){root.textContent='Повторное событие должно быть позже первого и попадать в смену.';return;}
   if(!offset.disabled && (!offset.value || !offset.checkValidity())){
     root.textContent='Введите целое число минут от 0 до '+plan.input.shiftMin+'.';return;
   }
   const body={vehicleId:vehicle.value,eventOffsetMin:offset.disabled?0:offset.valueAsNumber,shift:plan.input,shiftId:plan.id,edgeId:orderEdge,operation:$('order-operation').value,
     scenario:$('order-case').value,reverse:$('order-direction').value==='r',withEvent:$('order-event').checked};
+  Object.assign(body,{objectType:$('clock-object').value,queue:Number($('clock-queue').value),
+    eventKind:offset.disabled?'snowfall_end':$('clock-kind').value,repeatOffsetMin:!repeat.disabled && repeat.value!==''?repeat.valueAsNumber:null});
   $('attachment-controls').hidden=body.scenario!=='attachment';
   if(body.scenario==='attachment'){
     try{
@@ -212,6 +218,8 @@ async function refreshOrder(action){
     }catch(error){if(revision===orderRevision)root.textContent='Проверьте JSON: '+error.message;return;}
   }
   const parts=[data.network.version,plan.id,orderEdge,body.operation,body.scenario,body.reverse,body.withEvent];
+  if(body.objectType!=='roadway' || body.queue!==1 || body.eventKind!=='snowfall_end' || body.repeatOffsetMin!==null)
+    parts.push(body.objectType,body.queue,body.eventKind,body.repeatOffsetMin);
   if(vehicle.selectedIndex>0 || body.eventOffsetMin)parts.push(body.vehicleId,body.eventOffsetMin);
 
   try{
@@ -237,10 +245,12 @@ async function refreshOrder(action){
     }
     const localTime=value=>new Date(value).toLocaleString('ru-RU',{timeZone:'Asia/Kamchatka'});
     if(result.contract)add(root,'p','Учебный договор действует до '+localTime(result.contract.end)+' (Камчатка), исключая этот момент.');
-    if(result.event)add(root,'p','Снегопад закончился '+localTime(result.event.at)+' (учебное событие, Камчатка).');
-    const clock=result.clock;
-    add(root,'p',clock.dueAt?'Учебный срок: '+new Date(clock.dueAt).toLocaleString('ru-RU',{timeZone:'Asia/Kamchatka'})+' (Камчатка), основание: '+result.rule.clause:
-      clock.status==='clock_unknown'?'Срок неизвестен: отсутствует подтверждённое начальное событие.':'Срок неизвестен: требуется проверка применимости правила.');
+    for(const {event,rule,clock} of result.episodes){
+      if(event)add(root,'p',(event.kind==='ice_detected'?'Обнаружена скользкость':'Снегопад закончился')+' '+localTime(event.at)+' (учебное событие, Камчатка).');
+      if(clock.dueAt)add(root,'p','Учебный срок: '+localTime(clock.dueAt)+' (Камчатка) · '+rule.minutes+' мин · '+rule.version+' · '+rule.clause);
+      else if(!rule)add(root,'p','Срок неизвестен: нет применимой учебной редакции для объекта, очереди, операции и даты.');
+      else add(root,'p','Для запуска срока требуется событие: '+(rule.clockStart==='ice_detected'?'обнаружение скользкости.':'окончание снегопада.'));
+    }
     const route=result.routing;
     if(route)add(root,'p',route.assigned?'Отдельный расчёт: '+route.vehicle+' · с возвратом '+format(route.minutes,1)+' мин · '+money(route.cost):route.reason);
     add(root,'strong','Учебный журнал · '+stageNames[result.state]);
