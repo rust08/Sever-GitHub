@@ -29,15 +29,14 @@ function inlineModule(path,seen=new Set()){
   }).replace(/^export /gm,'');
   return [...children,inlineAssets(body)].join('\n');
 }
-const map=inlineModule('public/map.js');
-const app=read('public/app.js').replace(/^import .*?;$/gm,'');
+const app=inlineModule('public/app.js');
 let html=read('public/index.html').replace('<html lang="ru"', '<html data-network="'+JSON.parse(network).version+'" lang="ru"');
 html=html.replace(/<link\b[^>]*rel="stylesheet"[^>]*href="([^"]+)"[^>]*>/g,(_,path)=>'<style>'+inlineAssets(read('public'+path))+'</style>');
 html=html.replace(/<script\b[^>]*src="([^"]+)"[^>]*><\/script>/g,(_,path)=>path==='/app.js'?'':script(read('public'+path)));
 html=html.replace('</body>',()=>[
   '<p hidden id="demo-storage">Смена доступна в этой вкладке. Браузер ограничил её сохранение на устройстве.</p>',
   script(worker,'type="text/plain" id="sever-worker"'),
-  script(read('tools/demo-client.js')),script(map+'\n'+app,'type="module"'),'</body>'
+  script(read('tools/demo-client.js')),script(app,'type="module"'),'</body>'
 ].join('\n'));
 mkdirSync('dist',{recursive:true});
 writeFileSync('dist/sever-demo.html',html);

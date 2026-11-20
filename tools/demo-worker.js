@@ -16,6 +16,8 @@ self.onmessage=async ({data:message})=>{
         latest={id:snapshot.id,input:snapshot.input,result:await decodeShiftResult(snapshot.result)};
       }
       self.postMessage({seq,value:{...catalog,latest}});
+    }else if(path==='/api/unified-shifts/preview'){
+      self.postMessage({seq,value:await api(null,'POST',path,input,catalog)});
     }else if(path==='/api/haul/preview'){
       self.postMessage({seq,value:evaluateHaul(catalog,input)});
     }else if(path==='/api/orders/preview'){
