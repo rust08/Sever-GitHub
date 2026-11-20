@@ -9,7 +9,7 @@ import numpy as np
 from PIL import Image
 
 ZOOM = 11
-WEST, EAST, NORTH, SOUTH = 1924, 1930, 663, 670  # inclusive XYZ indices
+WEST, EAST, NORTH, SOUTH = 1922, 1931, 662, 671  # inclusive XYZ indices
 ROOT = Path(__file__).resolve().parents[1]
 
 

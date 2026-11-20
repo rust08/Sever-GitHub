@@ -88,7 +88,8 @@ export function previewOrder(data,input,request) {
     if(pass){
       const vehicle={...machine,rate:input.rates?.[machine.id]??machine.rate};
       const result=plan(data.network,[{...pass,priority:4,targetMin:input.shiftMin}],[vehicle],{...input,vehicleIds:[machine.id]});
-      routing={assigned:result.summary.assigned===1,cost:result.summary.cost,vehicle:vehicle.name,
+      const work=result.routes[0].legs.find(leg=>leg.type==='work');
+      routing={...(work?{workStartMin:work.startMin,workEndMin:work.endMin}:{}),assigned:result.summary.assigned===1,cost:result.summary.cost,vehicle:vehicle.name,
         minutes:result.routes[0].minutes,reason:result.unassigned[0]?.reason};
     }else routing={assigned:false,reason:'Направление недоступно для техники'};
   }

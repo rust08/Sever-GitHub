@@ -11,7 +11,8 @@ test('register preserves original PDF, asset and old scope across restart; concu
   const migration=readFileSync(new URL('../drizzle/0002_responsibility_register.sql',import.meta.url),'utf8');
   function open(){
     const db=new DatabaseSync(join(dir,'dispatch.sqlite'));
-    db.exec('PRAGMA foreign_keys=ON;'+migration);return db;
+    db.exec('PRAGMA foreign_keys=ON;'+migration);
+    db.exec(readFileSync(new URL('../drizzle/0004_registry_worksite.sql',import.meta.url),'utf8'));return db;
   }
   let db=open();t.after(()=>{db.close();rmSync(dir,{recursive:true,force:true});});
   const network={version:'net1',edges:[{id:'A',name:'Участок А',geometry:[[1,2],[2,3]]}]};

@@ -1,4 +1,7 @@
+import { initWorkflows } from './workflows.js';
+import {initDashboard} from './dashboard.js';
 import { RoadMap } from './map.js';
+import {createFleetEditor} from './fleet-ui.js';
 
 const $ = id => document.getElementById(id);
 const format = (value, digits = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: digits }).format(value);
@@ -44,64 +47,24 @@ function initialDate() {
   return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Kamchatka', year:'numeric', month:'2-digit', day:'2-digit' }).format(new Date());
 }
 function markChanged() {
+  $('discard').hidden=!plan;
   $('save-state').textContent = 'Изменения ожидают расчёта. Маршруты и времена относятся к сохранённому плану.';
 }
-function addVehicle(vehicle, active, open=false) {
-  const row = add($('fleet'),'div',null,'fleet-item');
-  row.dataset.id=vehicle.id;
-  const head=add(row,'label',null,'pick');
-  const enabled=add(head,'input'); enabled.type='checkbox'; enabled.value=vehicle.id; enabled.checked=active;
-  const caption=add(head,'span',vehicle.name); enabled.setAttribute('aria-label','Включить в смену: '+vehicle.name);
-  const editor=add(row,'details');editor.open=open;add(editor,'summary','Характеристики');
-  const fields=add(editor,'div',null,'fleet-fields');
-  for(const [key,label] of Object.entries({name:'Название',type:'Тип техники',rate:'Тариф, ₽/ч',workKmh:'Расчистка, км/ч',driveKmh:'Переезд, км/ч'})){
-    const field=add(add(fields,'label',label),'input');
-    field.dataset.field=key;field.required=true;
-    if(key==='name'||key==='type'){
-      field.type='text';field.maxLength=120;
-      field.value=vehicle[key] || (key==='type'?'Снегоуборочная машина':'');
-    }else{
-      field.type='number';field.min=key==='rate'?'0.01':'0';field.max=key==='rate'?'1000000':'200';field.step='any';field.value=vehicle[key];
-    }
-    field.addEventListener('invalid',()=>{editor.open=true;});
-    if(key==='name')field.oninput=()=>{
-      caption.textContent=field.value||'Машина';enabled.setAttribute('aria-label','Включить в смену: '+caption.textContent);
-    };
-  }
-  const availability=add(add(fields,'label','Доступность в смене'),'select');
-  availability.dataset.field='availability';
-  for(const [value,title] of Object.entries({demo:'Учебное допущение',reported:'Указана диспетчером на период',unknown:'Неизвестна',unavailable:'Недоступна'}))availability.add(new Option(title,value));
-  availability.value=vehicle.availability??'demo';
-  const windowFields=add(fields,'div');
-  for(const [key,title] of Object.entries({availableFrom:'Доступна с (Камчатка)',availableUntil:'Доступна до (Камчатка)',availabilitySource:'Основание доступности'})){
-    const input=add(add(windowFields,'label',title),'input');
-    input.type=key==='availabilitySource'?'text':'datetime-local';input.dataset.field=key;input.value=vehicle[key]??'';
-  }
-  function updateWindow(){windowFields.hidden=availability.value!=='reported';for(const el of windowFields.querySelectorAll('input'))el.required=!windowFields.hidden;}
-  availability.onchange=updateWindow;updateWindow();
-  const ops=add(fields,'details');add(ops,'summary','Виды работ машины');
-  for(const [key,title] of Object.entries(data.workTypes)){
-    const label=add(ops,'label');const box=add(label,'input');box.type='checkbox';box.dataset.operation=key;
-    box.checked=(vehicle.operations??['patrol_plow']).includes(key);label.append(document.createTextNode(title));
-  }
-  for(const [key,title] of Object.entries({tareKg:'Масса порожней машины, кг',payloadKg:'Грузоподъёмность самосвала, кг',bodyM3:'Объём кузова самосвала, м³',widthM:'Ширина с оборудованием, м',massT:'Рабочая масса, т',maxGradePct:'Допустимый уклон, %'})){
-    const el=add(add(fields,'label',title),'input');el.dataset.field=key;el.type='number';el.step='any';el.min=key==='maxGradePct'?'0':'0.01';el.value=vehicle[key]??'';if(key==='payloadKg'||key==='tareKg'){el.min='1';el.step='1';}if(key==='bodyM3'){el.min='1';el.step='1';el.max='1000';}
-  }
-  const remove=add(editor,'button','Удалить из парка','row-button');remove.type='button';
-  remove.onclick=()=>{row.remove();markChanged();$('add-vehicle').focus();};
-  return row;
-}
+let fleetEditor;
 function populate(input) {
   $('date').value = input?.date || initialDate();
   $('start').value = input?.start || '08:00';
   $('duration').value = input?.shiftMin ?? 240;
   $('budget').value = input?.budget ?? 30000;
   $('strategy').value = input?.strategy ?? 'parallel';
-  $('fleet').replaceChildren();
-  for (const vehicle of input?.fleet ?? data.fleet) {
-    addVehicle({...vehicle,rate:input?.rates?.[vehicle.id] ?? vehicle.rate},input ? input.vehicleIds.includes(vehicle.id) : true);
-  }
+  const vehicles=input?.fleet??data.fleet;
+  fleetEditor??=createFleetEditor($('fleet'),$('add-vehicle'),data.workTypes,markChanged,()=>({
+    date:$('date').value,start:$('start').value,shiftMin:$('duration').valueAsNumber
+  }));
+  fleetEditor.reset(vehicles,input?.vehicleIds??vehicles.map(v=>v.id),input?.rates);
   closedRoads = new Set((input?.closed || []).map(String).filter(id=>edges.has(id)));
+  incidentIds=new Set((input?.incidents??data.defaultIncidents).map(String));
+  if($('call-search')){drawPicker(false);drawPicker(true);return;}
   const counts=new Map();
   for (const edge of data.network.edges) {
     const name=edge.name || 'Проезд без названия';
@@ -135,6 +98,7 @@ function populate(input) {
   drawPicker(false); drawPicker(true);
 }
 function locate(edgeId) {
+  if(!$('map').getClientRects().length)navigateDashboard('overview');
   roadMap?.focus(edgeId);
   $('map').scrollIntoView({block:'center',behavior:'smooth'});
 }
@@ -195,7 +159,8 @@ function downloadOrder(report,filename='sever-order-'+report.shift.date+'.json')
 }
 function openOrder(edgeId){
   if(orderEdge!==edgeId)for(const id of ['limit-width','limit-mass','limit-grade'])$(id).value='';
-  orderEdge=edgeId;
+  orderEdge=edgeId;workflows?.orderSelected?.();
+  navigateDashboard('orders');
   const box=$('order-panel');box.open=true;
   $('order-operation').replaceChildren(...Object.entries(data.workTypes).map(([value,title])=>new Option(title,value)));
   const edge=edges.get(String(edgeId));
@@ -207,7 +172,7 @@ function openOrder(edgeId){
 }
 const sampleRow={edgeId:'w31172948-2001790818-2003931756',operation:'patrol_plow',customer:'Учебный заказчик',executor:'Учебная служба',officer:'Учебный диспетчер',
   contractId:'DEMO-01',source:'Учебная адресная ведомость',clause:'Строка 1',reviewer:'Учебный проверяющий',from:'2026-01-01',until:'2027-01-01'};
-let registryAttachment=null;
+let registryAttachment=null, selectedRegistryRef=null;
 const sampleAttachment={mode:'simulation',networkVersion:'pkgo-27233df581c6',rows:[sampleRow,{...sampleRow,edgeId:'unmapped-demo',clause:'Строка 2'}]};
 $('attachment-save').onclick=()=>downloadOrder(sampleAttachment,'sever-training-scope.json');
 $('attachment-show').onclick=()=>{registryAttachment=null;$('attachment-file').value='';roadMap?.focus(sampleRow.edgeId);openOrder(sampleRow.edgeId);};
@@ -300,6 +265,7 @@ function showRoad(id) {
   if(!title)return;
   const close=add(root,'button','×','row-button');close.type='button';close.setAttribute('aria-label','Закрыть карточку');close.onclick=()=>{root.hidden=true;};
   add(root,'strong',title);
+  add(root,'p','Дорожная сеть OSM · сценарные приоритеты','sub');
   if(roadMap?.mode==='coverage'){
     const rows=roadMap.coverage?.get(key)??[];
     if(!roadMap.coverage)add(root,'p','Срез сейчас недоступен.');
@@ -333,15 +299,9 @@ function showRoad(id) {
   btn.type='button';btn.disabled=saving;btn.onclick=()=>toggleEntry(false,key);
 }
 function readInput() {
-  const checked = id => [...$(id).querySelectorAll('input[type=checkbox]:checked:not([data-operation])')].map(el => el.value);
-  const fleet=[...$('fleet').children].map(row=>{
-    const vehicle={id:row.dataset.id,operations:[...row.querySelectorAll('[data-operation]:checked')].map(box=>box.dataset.operation)};
-    for(const el of row.querySelectorAll('[data-field]'))vehicle[el.dataset.field]=el.type==='number'?(el.value===''?null:el.valueAsNumber):el.value.trim();
-    return vehicle;
-  });
-  const rates=Object.fromEntries(fleet.map(v=>[v.id,v.rate]));
+  const {fleet,vehicleIds,rates}=fleetEditor.serialize();
   return {date:$('date').value,start:$('start').value,shiftMin:$('duration').valueAsNumber,budget:$('budget').valueAsNumber,
-    vehicleIds:checked('fleet'),closed:[...closedRoads].map(id => edges.get(id).id),
+    vehicleIds,closed:[...closedRoads].map(id => edges.get(id).id),
     incidents:[...incidentIds].filter(id=>callOptions.has(id)).map(id=>callOptions.get(id).id),rates,fleet,strategy:$('strategy').value};
 }
 async function calculate() {
@@ -349,7 +309,9 @@ async function calculate() {
   const input = readInput();
   if (!input.vehicleIds.length) { $('status').textContent = 'Выберите хотя бы одну машину.'; return; }
   saving = true;
+  fleetEditor.setBusy(true);
   $('settings').inert = true;
+
   $('submit').disabled = true;
   $('status').textContent = 'Строим маршруты и проверяем ограничения…';
   try {
@@ -357,10 +319,10 @@ async function calculate() {
     renderPlan(response);
     $('status').textContent = '';
   } catch (error) { $('status').textContent = 'Расчёт не выполнен. ' + error.message; }
-  finally {saving = false; $('settings').inert = false; $('submit').disabled = false;if(roadMap?.selected!=null)showRoad(roadMap.selected);}
+  finally {saving = false; fleetEditor.setBusy(false); $('settings').inert = false; $('submit').disabled = false;if(roadMap?.selected!=null)showRoad(roadMap.selected);}
 }
 function renderPlan(next) {
-  plan = next;clearHaul();
+  plan = next;workflows?.planChanged();clearHaul();
   $('shift-date').textContent = new Intl.DateTimeFormat('ru-RU', {day:'numeric',month:'long',year:'numeric',timeZone:'UTC'}).format(new Date(plan.input.date+'T00:00:00Z'));
   const ranked = new Map((plan.result.priorities || []).map(t => [String(t.id),t]));
   tasks = new Map(data.tasks.map(t => [String(t.id), {...t,...ranked.get(String(t.id))}]));
@@ -386,6 +348,7 @@ function renderPlan(next) {
   add($('metrics').children[1],'small','P1 в срок · '+summary.urgentOnTime+' из '+summary.urgentTotal,'sub');
   add($('metrics').children[2],'small','Лимит '+money(plan.input.budget),'sub');
   if(coverage)add($('metrics').children[3],'small','Частично · '+format(coverage.partiallyAssignedKm,1)+' км. Сеть · '+format(coverage.networkKm,1)+' км','sub');
+  $('discard').hidden=true;
   const selected = $('filter').value;
   $('filter').replaceChildren(new Option('Все машины',''), ...plan.result.routes.map(r => new Option(r.name,r.vehicleId)));
   if (plan.result.routes.some(r => String(r.vehicleId) === selected)) $('filter').value = selected;
@@ -393,6 +356,16 @@ function renderPlan(next) {
   $('minute').value = 0;
   $('time-start').textContent = clock(0); $('time-end').textContent = clock(plan.input.shiftMin);
   $('map-count').textContent = data.network.edges.length + ' дорожных участков · ' + plan.result.routes.length + ' маш. в смене';
+  $('attention').textContent=plan.result.unassigned.length?format(plan.result.unassigned.length)+' заданий осталось за пределами смены.':'Все задания включены в план.';
+  $('first-jobs').replaceChildren();
+  const first=plan.result.routes.flatMap(route=>route.legs.filter(leg=>leg.type==='work').slice(0,3).map(leg=>({route,leg})))
+    .sort((a,b)=>a.leg.startMin-b.leg.startMin).slice(0,3);
+  for(const {route,leg} of first){
+    const btn=add($('first-jobs'),'button',null,'first-job');
+    add(btn,'time',clock(leg.startMin));add(btn,'span',leg.name||leg.edgeId);
+    btn.onclick=()=>selectLeg(route,leg);
+  }
+  if(!first.length)$('first-jobs').textContent='Назначенных проходов пока нет.';
   drawRoutes(); drawTasks(); drawSkipped(); refreshMap();
   if(orderEdge!=null){syncOrderVehicles();refreshOrder();}
 }
@@ -412,6 +385,7 @@ function refreshMap() {
   }
 }
 function selectLeg(route, leg) {
+  if(!$('map').getClientRects().length)navigateDashboard('plan');
   $('filter').value = route.vehicleId;
   $('minute').value = leg.startMin;
   refreshMap(); roadMap.focus(leg.edgeId);
@@ -483,7 +457,9 @@ function drawSkipped() {
   const body = table(root,['Участок','Приоритет','Причина']);
   pagedRows(body,entries,item=>{
     const task = tasks.get(String(item.taskId));
-    const row = add(body,'tr');add(row,'td',task?.name || item.taskId);add(row,'td','P'+(task?.priority || '—'));add(row,'td',item.reason);
+    const row = add(body,'tr');const cell=add(row,'td');
+    if(task){const link=add(cell,'button',task.name,'row-button');link.onclick=()=>locate(task.edgeId);}
+    else cell.textContent=item.taskId;add(row,'td','P'+(task?.priority || '—'));add(row,'td',item.reason);
   });
 }
 async function init() {
@@ -505,16 +481,18 @@ async function init() {
     add($('status'),'button','Повторить').onclick = () => location.reload();
   }
 }
+const navigateDashboard=initDashboard();
 $('jump-routes').addEventListener('click', () => document.querySelector('[data-page=routes]').click());
+$('discard').onclick=()=>{
+  if(!plan||!confirm('Восстановить параметры, парк и перекрытия последнего расчёта?'))return;
+  populate(plan.input);syncDraft();renderPlan(plan);
+};
 $('settings').addEventListener('submit',e => {e.preventDefault(); calculate();});
 $('settings').addEventListener('input',e => {
   if (e.target.type === 'search') return;
   markChanged();
 });
-$('add-vehicle').onclick=()=>{
-  const row=addVehicle({id:'v-'+crypto.randomUUID(),name:'Машина '+($('fleet').children.length+1),type:'Снегоуборочная машина',rate:4000,workKmh:8,driveKmh:20},true,true);
-  row.querySelector('[data-field=name]').select();markChanged();
-};
+for(const id of ['date','start','duration'])$(id).addEventListener('change',()=>fleetEditor?.refresh());
 $('road-search').addEventListener('input',e => {
   drawPicker(false);
 });
@@ -581,6 +559,9 @@ function initRegistry(){
     $('reg-url').value=record.source_url;
     add(detail,'strong',modeName(record.mode)+' · '+record.contract_id+' · редакция '+record.revision);
     add(detail,'p','Сохранена '+new Date(record.recorded_at).toLocaleString('ru-RU',{timeZone:'Asia/Kamchatka'})+' (Камчатка) · сеть '+record.network_version);
+    if(record.source_url && /^https:\/\//i.test(record.source_url)){
+      const source=add(detail,'a','Открыть источник');source.href=record.source_url;source.target='_blank';source.rel='noreferrer';
+    }
     if(record.pdf_digest){
       const link=add(detail,'a','Скачать сохранённый PDF');
       link.href='/api/registry/document'+query;
@@ -594,7 +575,7 @@ function initRegistry(){
     const btn=add(detail,'button','Скачать строки редакции (JSON)','row-button');btn.type='button';
     const schedule={mode:record.mode,networkVersion:record.network_version,rows:record.rows.map(r=>({
       contractId:r.contract_id,edgeId:r.edge_id,objectType:r.object_type,jurisdiction:r.jurisdiction,owner:r.owner,balanceHolder:r.balance_holder,operation:r.operation,customer:r.customer,executor:r.executor,officer:r.officer,
-      source:r.source,clause:r.clause,reviewer:r.reviewer,from:r.date_from,until:r.date_until}))};
+      source:r.source,clause:r.clause,reviewer:r.reviewer,from:r.date_from,until:r.date_until,...(r.worksite?{worksite:r.worksite}:{})}))};
     btn.onclick=()=>downloadOrder(schedule,'scope-revision-'+revision+'.json');
     if(schedule.rows.length===1){
       for(const key of Object.keys(fields))$('reg-field-'+key).value=schedule.rows[0][key]??'';
@@ -603,11 +584,15 @@ function initRegistry(){
     const mapped=record.rows.find(r=>r.mapped && edges.has(r.edge_id));
     if(record.mode==='simulation' && mapped && record.network_version===data.network.version){
       const use=add(detail,'button','Проверить учебный наряд по редакции','row-button');use.type='button';
-      use.onclick=()=>{registryAttachment=schedule;$('attachment-file').value='';$('order-case').value='attachment';roadMap.focus(mapped.edge_id);openOrder(mapped.edge_id);$('order-operation').value=mapped.operation;refreshOrder();};
+      use.onclick=()=>{selectedRegistryRef={contractId:record.contract_id,revision:record.revision,line:mapped.line};registryAttachment=schedule;$('attachment-file').value='';$('order-case').value='attachment';roadMap.focus(mapped.edge_id);openOrder(mapped.edge_id);$('order-operation').value=mapped.operation;refreshOrder();};
     }
   }
   function failure(error){status.textContent=error.message;}
-  panel.addEventListener('toggle',()=>{if(panel.open)list().catch(failure);});
+  let loaded=false;
+  panel.addEventListener('toggle',()=>{
+    if(!panel.open||loaded)return;
+    loaded=true;list().catch(error=>{loaded=false;failure(error);});
+  });
   versions.onchange=()=>show().catch(failure);
   $('reg-example').onclick=()=>{example=true;$('reg-manual').open=false;$('reg-file').value='';status.textContent='Выбран учебный пример DEMO-01.';};
   $('reg-file').onchange=()=>{example=false;$('reg-manual').open=false;status.textContent='';};
@@ -620,7 +605,7 @@ function initRegistry(){
       if(!manual && !json && !example)throw Error('Выберите JSON или подставьте учебный пример.');
       if(json?.size>256*1024 || pdf?.size>12*1024*1024)throw Error('Допустимо до 256 КиБ JSON и 12 МиБ PDF.');
       const file=manual?{mode:$('reg-mode').value,networkVersion:data.network.version,
-        rows:[Object.fromEntries(Object.keys(fields).map(k=>[k,$('reg-field-'+k).value.trim()]).filter(([,v])=>v))]}:
+        rows:[{...(opened?.rows[0]?.worksite?{worksite:opened.rows[0].worksite}:{}),...Object.fromEntries(Object.keys(fields).map(k=>[k,$('reg-field-'+k).value.trim()]).filter(([,v])=>v))}]}:
         example?sampleAttachment:JSON.parse(await json.text());
       if(versions.value && (!opened || opened.contract_id!==file.rows?.[0]?.contractId))throw Error('Выберите редакцию этого договора или новую запись.');
       const pdfBase64=pdf?await new Promise((resolve,reject)=>{
@@ -706,10 +691,11 @@ function initEquipmentObservations(){
 }
 initEquipmentObservations();
 
+let workflows, readHaulOptions;
 let haulRevision=0;
 const haulPoints={};
 function clearHaul(){
-  haulRevision++;$('haul-result').replaceChildren();
+  workflows?.clearShared();haulRevision++;$('haul-result').replaceChildren();
   if(roadMap)roadMap.showHaul($('haul-travel').value==='network'?haulPoints:{});
 }
 function initHaul(){
@@ -728,16 +714,30 @@ function initHaul(){
     const manual=travel.value==='manual';
     $('haul-points').hidden=manual;$('haul-driveMin').disabled=!manual;
     $('haul-driveMin').parentElement.hidden=!manual;
-    if(roadMap)roadMap.onHaulPick=null;
+    if(roadMap?.onHaulPick)cancelPick();
     clearHaul();
   };
   const limits=new Map();
   let picked=null;
+  function pickMode(message){
+    $('pick-banner').hidden=!message;
+    $('pick-banner').querySelector('span').textContent=message||'';
+  }
+  function cancelPick(){
+    roadMap.onHaulPick=null;pickMode('');
+    for(const key of ['loadNode','siteNode'])$('haul-'+key+'-label').textContent=haulPoints[key]||'Точка не выбрана';
+    $('transit-status').textContent='Выбор отменён';
+  }
+  $('cancel-map-pick').onclick=cancelPick;
+  document.addEventListener('sever:leave-haul',()=>{if(roadMap?.onHaulPick)cancelPick();});
+  $('map-mode').addEventListener('change',()=>pickMode(''));
   $('transit-pick').onclick=()=>{
     if(!roadMap)return;
     roadMap.setMode('priority');roadMap.highlight(null);
     $('transit-status').textContent='Нажмите на дорогу.';
+    pickMode('Выберите участок с ограничением транзита');
     roadMap.onHaulPick=(node,name,id)=>{
+      pickMode('');
       roadMap.onHaulPick=null;picked={id,name};
       $('transit-road').textContent=name+' · '+id;
       for(const key of ['maxKg','widthM','gradePct','source'])$('transit-'+key).value=limits.get(id)?.[key]??'';
@@ -747,6 +747,7 @@ function initHaul(){
     mapBox.scrollIntoView({block:'center'});
   };
   function listLimits(){
+    $('limit-count').textContent=limits.size;
     const root=$('transit-list');root.replaceChildren();
     for(const r of limits.values()){
       const row=add(root,'p');
@@ -770,7 +771,9 @@ function initHaul(){
       if(!roadMap)return;
       roadMap.setMode('priority');roadMap.highlight(null);
       $('haul-'+key+'-label').textContent='Нажмите дорогу на карте';
+      pickMode(key==='loadNode'?'Выберите дорогу у точки погрузки':'Выберите дорогу у площадки разгрузки');
       roadMap.onHaulPick=(node,name)=>{
+        pickMode('');
         roadMap.onHaulPick=null;haulPoints[key]=node;
         $('haul-'+key+'-label').textContent=name+' · узел '+node;
         clearHaul();$('haul-form').scrollIntoView({block:'center'});
@@ -778,16 +781,20 @@ function initHaul(){
       mapBox.scrollIntoView({block:'center'});
     };
   }
-  form.onsubmit=async e=>{
-    e.preventDefault();clearHaul();
-    const revision=haulRevision,out=$('haul-result');
-    if(!plan){add(out,'p','Сначала рассчитайте смену.');return;}
+  readHaulOptions=()=>{
     const options={fleetMode:$('haul-fleet').value,sitePermitted:$('haul-permit').checked};
     const density=$('haul-density');
     if(density.value!=='')options.densityKgM3=density.valueAsNumber;
     Object.assign(options,{travelMode:travel.value},travel.value==='network'?haulPoints:{});
     if(travel.value==='network')options.transitLimits=[...limits.values()];
     for(const [key] of fields)options[key]=$('haul-'+key).valueAsNumber;
+    return options;
+  };
+  form.onsubmit=async e=>{
+    e.preventDefault();clearHaul();
+    const revision=haulRevision,out=$('haul-result');
+    if(!plan){add(out,'p','Сначала рассчитайте смену.');return;}
+    const options=readHaulOptions();
     try{
       const result=await api('/api/haul/preview',{shift:plan.input,options});
       if(revision!==haulRevision)return;
@@ -825,3 +832,28 @@ function initHaul(){
   };
 }
 initHaul();
+
+workflows=initWorkflows({
+  api,add,table,getPlan:()=>plan,getHaul:()=>readHaulOptions(),
+  showEdge:locate,
+  showHaulMap:(points,paths)=>{
+    if(!$('map').getClientRects().length)navigateDashboard('haul');
+    roadMap.setMode('priority');
+    if(paths.outward?.edges.length)roadMap.focus(String(paths.outward.edges[0]));
+    roadMap.showHaul(points,paths,'outward');
+    $('map').scrollIntoView({block:'center'});
+  },
+  edgeName:id=>roadOptions.get(String(id))||edges.get(String(id))?.name||('Участок '+id),
+  getPickedPass:()=>orderEdge?'pass:'+orderEdge+':'+$('order-direction').value:null,
+  getOrder:()=>{
+    if(!orderEdge || !plan)return null;
+    const scenario=$('order-case').value;
+    if(scenario!=='example' && scenario!=='attachment')throw Error('Выберите учебный образец или сохранённую редакцию реестра.');
+    if(scenario==='attachment' && (!selectedRegistryRef || $('attachment-file').files.length || !registryAttachment))
+      throw Error('Для серверного наряда откройте сохранённую учебную редакцию в реестре.');
+    if(['limit-width','limit-mass','limit-grade'].some(id=>$(id).value!==''))
+      throw Error('Локальные ограничения карточки действуют в её предпросмотре. Для серверного наряда используйте ограничения строки реестра.');
+    return {vehicleId:$('order-vehicle').value,edgeId:orderEdge,operation:$('order-operation').value,
+      reverse:$('order-direction').value==='r',...(scenario==='attachment'?{registryRef:selectedRegistryRef}:{})};
+  }
+});

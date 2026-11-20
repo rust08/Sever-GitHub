@@ -1,0 +1,37 @@
+#fleet{display:block;border:0;min-width:0}
+.fleet-tools{display:grid;grid-template-columns:minmax(12rem,2fr) repeat(3,minmax(8rem,1fr));gap:.75rem;align-items:end;margin-block:.5rem 1rem}
+.fleet-tools label,.fleet-dialog label{color:var(--text);font-size:.87rem}
+.fleet-actions,.fleet-pager,.fleet-editor-actions{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.fleet-actions{margin-block:0 1rem}
+.fleet-actions #add-vehicle{margin:0 0 0 auto}
+.fleet-counter{font-weight:650;margin-inline-end:.5rem}
+.fleet-viewport{overflow:auto;max-height:64vh;border:1px solid var(--line);border-radius:.7rem}
+.fleet-grid{width:100%;border-collapse:separate;border-spacing:0;min-width:43rem}
+.fleet-grid thead th{position:sticky;top:0;background:var(--raised);color:var(--muted);z-index:1;white-space:nowrap}
+.fleet-grid td,.fleet-grid th{padding:.55rem .7rem;vertical-align:middle;border-bottom:1px solid var(--soft-line);font-size:.85rem;overflow-wrap:anywhere}
+.fleet-grid tr:last-child td{border-bottom:0}
+.fleet-grid small{display:block;margin-top:.18rem;color:var(--muted);font-size:.76rem}
+.fleet-grid tbody tr:hover{background:var(--raised)}
+.fleet-grid td:first-child{text-align:center}
+.fleet-grid .row-button,.fleet-actions .row-button,.fleet-pager .row-button{margin:0;white-space:nowrap}
+.fleet-pager{justify-content:flex-end;margin-top:.7rem;color:var(--muted);font-size:.85rem}
+.fleet-empty{padding:1rem;color:var(--muted)}
+.fleet-dialog{inset:0;margin:auto 0 auto auto;padding:0;width:min(34rem,100%);max-width:100vw;height:100dvh;max-height:100dvh;border:0;border-left:1px solid var(--line);background:var(--panel);color:var(--text);box-shadow:-1rem 0 3rem #05152733}
+.fleet-dialog::backdrop{background:rgba(7,22,32,.55)}
+.fleet-editor-form{display:grid;grid-template-rows:auto minmax(0,1fr) auto;height:100%;margin:0}
+.fleet-editor-head{position:static;background:var(--panel);border-bottom:1px solid var(--line);padding:1rem 1.3rem}
+.fleet-editor-head h2{font-size:1.35rem;margin:0}
+.fleet-editor-body{overflow:auto;overscroll-behavior:contain;padding:.5rem 1.3rem}
+.fleet-editor-body fieldset{border:0;margin:1rem 0 1.4rem;padding:0}
+.fleet-editor-body legend{font-size:1rem;font-weight:700;color:var(--text);margin-bottom:.7rem}
+.fleet-editor-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.7rem}
+.fleet-editor-grid .fleet-check{display:flex;align-items:center;gap:.45rem;font-weight:500}
+.fleet-editor-grid input,.fleet-editor-grid select{min-width:0}
+.fleet-editor-note{grid-column:1/-1;color:var(--muted)}
+.fleet-editor-actions{position:static;border-top:1px solid var(--line);padding:.75rem 1.1rem max(.75rem,env(safe-area-inset-bottom));justify-content:flex-end;background:var(--panel)}
+.fleet-editor-actions button{margin:0;width:auto}
+.fleet-editor-actions .fleet-remove{margin-right:auto}
+.fleet-editor-actions .primary{min-height:38px}
+.fleet-editor-grid [hidden],.fleet-pager[hidden],.fleet-empty[hidden],.fleet-viewport[hidden]{display:none}
+@media(max-width:1000px){.fleet-tools{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:600px){.fleet-tools{gap:.5rem}.fleet-actions #add-vehicle{margin-left:0}.fleet-actions{align-items:stretch}.fleet-actions .fleet-counter{flex-basis:100%}.fleet-editor-body,.fleet-editor-head{padding-inline:1rem}.fleet-editor-actions{padding-inline:.7rem}.fleet-viewport{max-width:100%;max-height:60vh}.fleet-editor-grid{gap:.6rem}}
