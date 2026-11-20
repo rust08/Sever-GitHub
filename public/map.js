@@ -17,7 +17,7 @@ const labels = {
   state:[['pending','Запланировано'],['active','В работе'],['partial','Часть проходов завершена'],['done','Все проходы завершены'],['missed','Без назначения']],
   routes:[['active','Расчистка'],['drive','Переезд']]
 };
-const reliefBounds = [[663,1924],[671,1931]].map(([y,x]) => [
+const reliefBounds = [[662,1922],[672,1932]].map(([y,x]) => [
   Math.atan(Math.sinh(Math.PI * (1 - 2*y/2048))) * 180/Math.PI, x/2048*360-180
 ]);
 function append(map, id, value) {
@@ -63,7 +63,9 @@ function addStreetDetail(map) {
         return line;
       });
       const style={pane:'geography',renderer,interactive:false,color:colors[kind],weight:1,fillOpacity:kind==='building'?.76:kind==='water'?1:.40,opacity:kind==='coast'?.75:.45};
-      if(kind==='coast'||kind==='river')L.polyline(lines,style).addTo(group);
+      if(kind==='contextRoad'){
+        L.polyline(lines,{...style,color:'#718087',weight:map.getZoom()<14?1:2,opacity:.65}).addTo(group);
+      }else if(kind==='coast'||kind==='river')L.polyline(lines,style).addTo(group);
       else L.polygon(lines,style).addTo(group);
     }
   }
@@ -138,8 +140,8 @@ export class RoadMap {
         this.pilot=L.featureGroup();
         for(const [id,name,way,coordinates] of territoryPilot.roads){
           const points=coordinates.map(([longitude,latitude])=>[latitude,longitude]);
-          const line=L.polyline(points,{color:'#59646c',weight:5,bubblingMouseEvents:false}).addTo(this.pilot);
-          line.pilotId=id;
+          const line=L.polyline(points,{color:'#59646c',weight:2.2,opacity:.78,bubblingMouseEvents:false}).addTo(this.pilot);
+          line.pilotId=id;line.streetName=name;
           line.bindPopup(()=>{
             const card=document.createElement('div');
             const title=document.createElement('strong');
@@ -157,11 +159,14 @@ export class RoadMap {
           });
         }
       }
+      this.routeLayers.remove();
+      document.querySelector('.map-key').open=true;
       this.pilot.addTo(this.map);
       this.map.fitBounds(this.pilot.getBounds(),{padding:[16,16],animate:false});
     }else if(this.previousView){
       this.map.closePopup();
       this.pilot.remove();
+      this.routeLayers.addTo(this.map);
       this.cityRoads.addTo(this.map);
       this.markers.addTo(this.map);
       this.map.setView(this.previousView.center,this.previousView.zoom,{animate:false});
@@ -183,6 +188,26 @@ export class RoadMap {
         this.pilot.eachLayer(line=>line.setStyle({color:toggle.checked && territoryPilot.hints[line.pilotId]?'#7840a0':'#59646c'}));
       };
       label.append(toggle,document.createTextNode('Фиолетовый — историческое упоминание улицы'));root.append(label);
+      const street=document.createElement('select');
+      street.setAttribute('aria-label','Улица пилотного района');
+      street.add(new Option('Все улицы пилотного района',''));
+      const names=[...new Set(territoryPilot.roads.map(row=>row[1]).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ru'));
+      for(const name of names)street.add(new Option(name,name));
+      const update=()=>{
+        this.pilot.eachLayer(line=>{
+          const chosen=!street.value||line.streetName===street.value;
+          line.setStyle({color:toggle.checked && territoryPilot.hints[line.pilotId]?'#7840a0':'#475966',
+            weight:street.value&&chosen?4:2.2,opacity:chosen?.85:.12});
+        });
+      };
+      street.onchange=()=>{
+        update();
+        const lines=this.pilot.getLayers().filter(line=>!street.value||line.streetName===street.value);
+        this.map.fitBounds(L.latLngBounds(lines.flatMap(line=>line.getLatLngs())),{maxZoom:16,padding:[25,25]});
+      };
+      toggle.addEventListener('change',update);
+      root.append(street);update();
+
       return;
     }
     if(this.mode==='coverage'){root.textContent='Серый — без строки · синий — одна строка · малиновый — пересечение строк';return;}

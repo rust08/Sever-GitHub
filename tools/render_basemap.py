@@ -19,14 +19,14 @@ from shapely.geometry.polygon import orient
 from shapely.ops import nearest_points, polygonize, unary_union
 
 ROOT=Path(__file__).resolve().parents[1]
-W,E,N,S=1924,1931,663,671
+W,E,N,S=1922,1932,662,672
 ZOOM=11
 TILES=2**ZOOM
 SIZE=((E-W)*256,(S-N)*256)
 def lon(x): return x/TILES*360-180
 def lat(y): return degrees(atan(sinh(pi*(1-2*y/TILES))))
 FRAME=box(lon(W),lat(S),lon(E),lat(N))
-CITY=box(158.42,52.82,159.06,53.18)
+CITY=box(158.15,52.72,159.14,53.31)
 COLORS={'forest':'#bed2b9','park':'#c9dec4','brush':'#d4ddc4','urban':'#ece9e0',
         'industrial':'#e0dcd3','water':'#a9cacd','river':'#9cbfc1','building':'#d1c8b9'}
 def project(line):
@@ -71,11 +71,13 @@ def extract(path):
         elif obj.is_way():
             coast=t.get('natural')=='coastline'
             stream=t.get('waterway') in ('river','stream','canal')
-            if not (coast or stream):continue
+            road=t.get('highway') in ('primary','secondary','tertiary','trunk','residential','unclassified')
+            if not (coast or stream or road):continue
             try: line=LineString([(n.lon,n.lat) for n in obj.nodes])
             except (RuntimeError,ValueError):continue
             for segment in parts(FRAME.intersection(line),'LineString'):
-                if coast:coasts.append(segment)
+                if road:features['contextRoad'].extend(parts(CITY.intersection(segment),'LineString'))
+                elif coast:coasts.append(segment)
                 elif segment.length>.001:features['river'].append(segment)
         elif obj.is_node() and t.get('name') and t.get('natural') in ('peak','bay','strait'):
             x,y=obj.location.lon,obj.location.lat
@@ -154,7 +156,7 @@ def vector_context(features,coasts,landmarks):
     # Coordinates are delta-encoded to 0.00001 degree (less than 1.2 m).
     grid=defaultdict(list);records=[]
     all_features=dict(features,coast=coasts)
-    for kind in ('brush','forest','park','urban','industrial','water','river','coast','building'):
+    for kind in ('brush','forest','park','urban','industrial','water','river','coast','contextRoad','building'):
         for g in all_features[kind]:
             if not CITY.intersects(g):continue
             g=g.simplify(.000012,preserve_topology=True)
@@ -178,6 +180,6 @@ def main():
     print('land',len(land),'coasts',len(coasts),'geography',[(k,len(v)) for k,v in features.items()])
     raster=render_raster(features,land,ROOT/'data/terrain-shading.webp')
     vec,counts=vector_context(features,coasts,landmarks)
-    print('bytes',raster.stat().st_size,vec.stat().st_size,'detail',counts,'landmarks',landmarks)
+    print('bytes',raster.stat().st_size,vec.stat().st_size,'detail',counts,'landmarks',len(landmarks))
 if __name__=='__main__':main()
 
