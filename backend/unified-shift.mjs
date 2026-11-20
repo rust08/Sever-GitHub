@@ -25,7 +25,7 @@ export function validateUnifiedPlan(plan){
     spent!==plan.spentCents||plan.remainingCents!==plan.budgetCents-spent)throw Error('Нарушен баланс бюджета смены');
 }
 
-export function combineShift(data,input,clearing,options,plowClosed){
+export function combineShift(data,input,clearing,options,plowClosed,episode=null){
   const budgetCents=Math.round(input.budget*100);
   const plowCents=Math.round(clearing.summary.cost*100);
   const readyAt=new Map();
@@ -44,7 +44,34 @@ export function combineShift(data,input,clearing,options,plowClosed){
     else atOtherDepot.add(route.vehicleId);
   }
   const haulInput={...input,budget:(budgetCents-plowCents)/100,vehicleIds:input.vehicleIds.filter(id=>!atOtherDepot.has(id))};
-  const haul=calculateHaul(haulInput,input.fleet??data.fleet,options,data.network,readyAt);
+  let haul;
+  if(episode){
+    const {minute,previous,addedM3}=episode;
+    const locked=previous.trips.filter(trip=>trip.start<=minute);
+    const volume=locked.reduce((total,t)=>total+t.amount,0);
+    const cents=locked.reduce((total,t)=>total+t.cents,0);
+    haulInput.budget=(budgetCents-plowCents-cents)/100;
+    for(const id of haulInput.vehicleIds)readyAt.set(id,Math.max(minute,readyAt.get(id)??0));
+    let postFree=options.siteBusyUntil;
+    for(const trip of locked){
+      readyAt.set(trip.truckId,Math.max(readyAt.get(trip.truckId)??0,trip.back));
+      readyAt.set(previous.loaderId,Math.max(readyAt.get(previous.loaderId)??0,trip.depart));
+      postFree=Math.max(postFree,trip.finish);
+    }
+    const total=previous.delivered+previous.remaining+addedM3;
+    haul=calculateHaul(haulInput,input.fleet??data.fleet,{...options,volume:total-volume,
+      siteCapacity:options.siteCapacity-volume,siteBusyUntil:postFree},data.network,readyAt);
+    // Keep path references in already-started trips stable across revisions.
+    const offset=previous.routeSets.length;
+    for(const trip of haul.trips)if(trip.routeIndex!==undefined)trip.routeIndex+=offset;
+    haul.routeSets=[...previous.routeSets,...haul.routeSets];
+    haul.trips=[...locked,...haul.trips];
+    haul.cost=(Math.round(haul.cost*100)+cents)/100;
+    haul.delivered+=volume;
+    haul.totalCargoKg=haul.delivered*options.densityKgM3;
+  }else{
+    haul=calculateHaul(haulInput,input.fleet??data.fleet,options,data.network,readyAt);
+  }
   if(options.siteBusyUntil>0)reserve('unload_post',options.siteNode,'prior_booking',0,Math.min(options.siteBusyUntil,input.shiftMin),{});
   for(const [index,t] of haul.trips.entries()){
     const detail={trip:index+1};

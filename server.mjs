@@ -1,3 +1,4 @@
+import {demoShiftResponse} from './backend/demo-shifts.mjs';
 import {journalResponse} from './backend/execution-journal.mjs';
 import {registryResponse} from './backend/registry.mjs';
 import {DatabaseSync} from 'node:sqlite';
@@ -42,7 +43,8 @@ const server=createServer(async(req,res)=>{
     if(req.url==='/api/version'){res.writeHead(200,{'Content-Type':'text/plain','Cache-Control':'no-store'});return res.end('sever-city-dark-1')}
     const registry=req.url.split('?')[0].startsWith('/api/registry');
     const journal=req.url.split('?')[0].startsWith('/api/work-orders');
-    if(registry || journal || req.method!=='GET'){
+    const demo=req.url.split('?')[0].startsWith('/api/demo-shifts');
+    if(demo || registry || journal || req.method!=='GET'){
       const host=req.headers.host??'';
       if(!/^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host) || (req.headers.origin && req.headers.origin!=='http://'+host)){
         res.writeHead(403);return res.end();
@@ -51,7 +53,7 @@ const server=createServer(async(req,res)=>{
     const chunks=[]; let bytes=0;
     for await (const chunk of req) {bytes+=chunk.length;if(bytes>(registry?18:2)*1024*1024){res.writeHead(413);return res.end()} chunks.push(chunk)}
     const request=new Request(new URL(req.url,'http://127.0.0.1'),{method:req.method,headers:req.headers,body:chunks.length?Buffer.concat(chunks):undefined});
-    const response=journal?await journalResponse(request,sqlite,data):registry?await registryResponse(request,sqlite,data.network):await handle(request,db,asset,data);
+    const response=demo?await demoShiftResponse(request,sqlite,data):journal?await journalResponse(request,sqlite,data):registry?await registryResponse(request,sqlite,data.network):await handle(request,db,asset,data);
     res.writeHead(response.status,Object.fromEntries(response.headers));
     res.end(Buffer.from(await response.arrayBuffer()));
   } catch(e) {console.error(e);res.writeHead(500);res.end()}
