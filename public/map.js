@@ -211,6 +211,7 @@ export class RoadMap {
       return;
     }
     if(this.mode==='coverage'){root.textContent='Серый — без строки · синий — одна строка · малиновый — пересечение строк';return;}
+    if(this.mode==='attachment'){root.textContent='Синий — участок в приложении · серый — участок вне сопоставленных границ';return;}
     for(const [key,label] of [...labels[this.mode],['closed','Перекрыто'],['draft','Изменение перекрытия'],['base','База']]) {
       const row=document.createElement('span'), mark=document.createElement('i');
       if(key==='base') mark.textContent='◆';
@@ -224,7 +225,8 @@ export class RoadMap {
   focus(id) {
     if(this.mode==='territory')this.setMode('priority');
     const path=this.paths.get(String(id));if(!path)return;
-    this.map.fitBounds(path.line.getBounds(),{maxZoom:17,padding:[48,48],animate:false});
+    const padding=this.mode==='attachment'?{paddingTopLeft:[48,16],paddingBottomRight:[48,208]}:{padding:[48,48]};
+    this.map.fitBounds(path.line.getBounds(),{maxZoom:17,...padding,animate:false});
     this.highlight(String(id));
   }
   fit(){this.map.fitBounds(this.bounds,{padding:[16,16],animate:false});this.highlight(null);}
@@ -245,8 +247,9 @@ export class RoadMap {
     this.selected=id;
     this.selection?.remove();this.selection=null;
     const path=this.paths.get(id);
+    const color=this.mode==='attachment'?(this.attachment?.mapped.has(id)?STYLES.single.color:'#5e6c73'):'#fbc336';
     if(path) this.selection=L.polyline(path.points,{pane:'routeLayer',renderer:this.routeRenderer,
-      weight:8,color:'#fbc336',opacity:.83,interactive:false}).addTo(this.map);
+      weight:8,color,opacity:.83,interactive:false}).addTo(this.map);
     this.onSelect(id);
   }
   show(plan,vehicle,minute) {
@@ -294,6 +297,7 @@ export class RoadMap {
   }
   styleFor(id,path) {
     if(this.mode==='coverage'){const n=this.coverage?.get(id)?.length??0;return n>1?'overlap':n?'single':'none';}
+    if(this.mode==='attachment')return this.attachment?.mapped.has(id)?'single':'none';
     const closed=this.closed.has(id), proposed=this.draft?.has(id) ?? closed;
     if(closed!==proposed)return 'draft';
     if(closed)return 'closed';
@@ -337,7 +341,7 @@ export class RoadMap {
       }
     }
     this.markers.clearLayers();
-    if(this.mode==='coverage')return;
+    if(this.mode==='coverage' || this.mode==='attachment')return;
     const positions=new Map();
     for(const route of this.routes || []) {
       if(!route.legs.length)continue;

@@ -8,6 +8,9 @@
 .credits a{color:inherit}
 .map-toolbar{display:flex;align-items:center;gap:6px 18px;flex-wrap:wrap;padding:3px 17px 9px}
 .map-toolbar select{width:auto}
+.annex-controls{padding:0 15px 10px;overflow-wrap:anywhere}
+.annex-controls ul{margin:6px 0;padding-inline-start:20px}
+.annex-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
 .snow-truck span{display:grid;place-items:center;border:2px solid white;border-radius:50%;height:100%;width:100%;color:white;font:700 12px/1 'Segoe UI',sans-serif;box-shadow:0 1px 5px #172e3780}
 .snow-depot{font:700 17px/1 sans-serif;color:#243a4b;text-shadow:0 0 3px white}
 #map-legend i:not(:empty){border:0;width:auto;color:#243a4b;font-style:normal}

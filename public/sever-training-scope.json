@@ -1,0 +1,32 @@
+{
+  "mode": "simulation",
+  "networkVersion": "pkgo-27233df581c6",
+  "rows": [
+    {
+      "edgeId": "w31172948-2001790818-2003931756",
+      "operation": "patrol_plow",
+      "customer": "Учебный заказчик",
+      "executor": "Учебная служба",
+      "officer": "Учебный диспетчер",
+      "contractId": "DEMO-01",
+      "source": "Учебная адресная ведомость",
+      "clause": "Строка 1",
+      "reviewer": "Учебный проверяющий",
+      "from": "2026-01-01",
+      "until": "2027-01-01"
+    },
+    {
+      "edgeId": "unmapped-demo",
+      "operation": "patrol_plow",
+      "customer": "Учебный заказчик",
+      "executor": "Учебная служба",
+      "officer": "Учебный диспетчер",
+      "contractId": "DEMO-01",
+      "source": "Учебная адресная ведомость",
+      "clause": "Строка 2",
+      "reviewer": "Учебный проверяющий",
+      "from": "2026-01-01",
+      "until": "2027-01-01"
+    }
+  ]
+}
