@@ -11,7 +11,8 @@ export default {async fetch(request,env) {
   return handle(request,db,path=>{
     if(!Object.hasOwn(assets,path)) return null;
     if(path.endsWith('.webp'))return new Response(Uint8Array.from(atob(assets[path]),c=>c.charCodeAt(0)),{headers:{'content-type':'image/webp'}});
-    const mime=path.endsWith('.html')?'text/html':path.endsWith('.js')?'text/javascript':path.endsWith('.css')?'text/css':'text/plain';
+    const mime=path.endsWith('.html')?'text/html':path.endsWith('.js')?'text/javascript':path.endsWith('.css')?'text/css':
+      path.endsWith('.json')?'application/json':'text/plain';
     return new Response(assets[path],{headers:{'content-type':mime+'; charset=utf-8'}});
   },data);
 }};

@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {api,createCatalog,calculateShift} from './service.mjs';
 import {assessMandate,assessClock} from './governance.mjs';
 
@@ -94,10 +95,38 @@ test('address schedule matches exact edge, shift date and operation; orphan rows
   const p=await scopePreview([scopeRow,{...scopeRow,edgeId:'unknown'}]);
   assert.equal(p.mode,'simulation');assert.equal(p.mandate.status,'eligible');assert.equal(p.routing.assigned,true);
   assert.equal(p.contract.document,scopeRow.source);assert.deepEqual(p.attachment.unmatched,[2]);
-  for(const row of [{...scopeRow,edgeId:'return'},{...scopeRow,from:'2026-11-21',until:'2026-11-22'},
-    {...scopeRow,from:'2026-11-01',until:'2026-11-20'},{...scopeRow,operation:'anti_icing'}]){
-    const q=await scopePreview([row]);assert.equal(q.routing,null);assert.equal(q.responsibility,null);
+  for(const [change,status] of [[{edgeId:'return'},'outside'],[{from:'2026-11-21',until:'2026-11-22'},'inactive'],
+    [{from:'2026-11-01',until:'2026-11-20'},'inactive'],[{operation:'anti_icing'},'operation_excluded']]){
+    const q=await scopePreview([{...scopeRow,...change}]);
+    assert.equal(q.attachment.status,status);assert.equal(q.mandate.status,'blocked');
+    assert.equal(q.routing,null);assert.equal(q.responsibility,null);assert.deepEqual(q.actions,[]);
   }
+});
+test('bundled training annex fixes the covered road and identifies a row requiring manual review',async()=>{
+  const network=JSON.parse(readFileSync(new URL('../data/city-network.json',import.meta.url),'utf8'));
+  const city=createCatalog(network);
+  const attachment=JSON.parse(readFileSync(new URL('../public/sever-training-scope.json',import.meta.url),'utf8'));
+  const [covered,orphan]=attachment.rows;
+  const run=(edgeId,file=attachment)=>api(null,'POST','/api/orders/preview',{...request,edgeId,scenario:'attachment',attachment:file},city);
+  const inside=await run(covered.edgeId);
+  assert.equal(inside.attachment.status,'covered');
+  assert.equal(inside.mandate.status,'eligible');
+  assert.equal(inside.responsibility.officer,covered.officer);
+  assert.equal(inside.contract.customer,covered.customer);
+  assert.equal(inside.contract.executor,covered.executor);
+  assert.equal(inside.contract.document,covered.source);
+  assert.deepEqual(inside.attachment.unmapped,[{line:2,edgeId:orphan.edgeId,contractId:orphan.contractId,source:orphan.source,
+    clause:orphan.clause,operation:orphan.operation,from:orphan.from,until:orphan.until}]);
+  const sameStreet=network.edges.find(edge=>edge.id!==covered.edgeId && edge.name===network.edges.find(e=>e.id===covered.edgeId).name);
+  const outside=await run(sameStreet.id);
+  assert.equal(outside.attachment.status,'outside');
+  assert.equal(outside.mandate.status,'blocked');
+  assert.equal(outside.routing,null);
+  const review=await run(sameStreet.id,{...attachment,rows:[orphan]});
+  assert.equal(review.attachment.status,'unmapped');
+  assert.equal(review.mandate.status,'manual_review');
+  assert.equal(review.routing,null);
+  assert.deepEqual(review.actions,[]);
 });
 test('ambiguous scope blocks dispatch and a malformed dossier cannot start a route',async()=>{
   const p=await scopePreview([scopeRow,{...scopeRow,contractId:'second'}]);

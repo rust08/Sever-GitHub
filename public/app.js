@@ -2,6 +2,7 @@ import { initWorkflows } from './workflows.js';
 import {initDashboard} from './dashboard.js';
 import { RoadMap } from './map.js';
 import {createFleetEditor} from './fleet-ui.js';
+import {readContractAnnex} from './contract-annex.js';
 
 const $ = id => document.getElementById(id);
 const format = (value, digits = 0) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: digits }).format(value);
@@ -170,13 +171,26 @@ function openOrder(edgeId){
   if(plan)syncOrderVehicles();
   refreshOrder();box.scrollIntoView({block:'center'});
 }
-const sampleRow={edgeId:'w31172948-2001790818-2003931756',operation:'patrol_plow',customer:'Учебный заказчик',executor:'Учебная служба',officer:'Учебный диспетчер',
-  contractId:'DEMO-01',source:'Учебная адресная ведомость',clause:'Строка 1',reviewer:'Учебный проверяющий',from:'2026-01-01',until:'2027-01-01'};
 let registryAttachment=null, selectedRegistryRef=null;
-const sampleAttachment={mode:'simulation',networkVersion:'pkgo-27233df581c6',rows:[sampleRow,{...sampleRow,edgeId:'unmapped-demo',clause:'Строка 2'}]};
-$('attachment-save').onclick=()=>downloadOrder(sampleAttachment,'sever-training-scope.json');
-$('attachment-show').onclick=()=>{registryAttachment=null;$('attachment-file').value='';roadMap?.focus(sampleRow.edgeId);openOrder(sampleRow.edgeId);};
+async function readSampleAttachment(){
+  const response=await fetch('/sever-training-scope.json');
+  if(!response.ok)throw Error('Не удалось загрузить учебный файл');
+  return response.json();
+}
+async function loadAttachment(){
+  const file=$('attachment-file').files[0];
+  const saved=registryAttachment;
+  if(file?.size>64000)throw Error('Максимальный размер файла 64 КБ');
+  const attachment=file?JSON.parse(await file.text()):(saved??await readSampleAttachment());
+  return {attachment,name:file?.name??(saved?'Редакция учебного реестра':'sever-training-scope.json')};
+}
+function unmappedText(row){
+  return 'Строка '+row.line+' · '+row.contractId+' · '+row.source+', '+row.clause+' · ID «'+row.edgeId+
+    '» отсутствует в текущей сети. Сверьте ID и границы участка по схеме приложения.';
+}
+$('attachment-map').onclick=()=>{navigateDashboard('overview');roadMap.setMode('attachment');};
 async function refreshOrder(action){
+  $('attachment-map').hidden=$('order-case').value!=='attachment';
   if(orderEdge==null || !plan)return;
   const revision=++orderRevision;
   const offset=$('order-offset'), vehicle=$('order-vehicle');
@@ -198,12 +212,9 @@ async function refreshOrder(action){
     const el=$(id);if(!el.checkValidity()){root.textContent='Проверьте ограничения выбранного участка.';return;}
     if(el.value!=='')body.worksite[key]=el.valueAsNumber;
   }
-  $('attachment-controls').hidden=body.scenario!=='attachment';
   if(body.scenario==='attachment'){
     try{
-      const file=$('attachment-file').files[0];
-      if(file && file.size>64000)throw Error('Максимальный размер 64 КБ');
-      body.attachment=file?JSON.parse(await file.text()):(registryAttachment??sampleAttachment);
+      body.attachment=(await loadAttachment()).attachment;
       if(revision!==orderRevision)return;
     }catch(error){if(revision===orderRevision)root.textContent='Проверьте JSON: '+error.message;return;}
   }
@@ -231,11 +242,15 @@ async function refreshOrder(action){
     add(root,'p','Ответственный: '+(result.responsibility?.officer||'не подтверждён')+' · исполнитель: '+(result.responsibility?.executor||'не подтверждён'));
     for(const reason of [...m.missing,...m.conflicts])add(root,'p',reason);
     if(result.attachment){
-      add(root,'p','Совпавших строк: '+result.attachment.matchCount+'. Без геометрии: '+(result.attachment.unmatched.join(', ')||'нет')+'.');
+      if(result.attachment.status==='covered')add(root,'p','Участок и вид работ входят в действующее учебное приложение.');
       if(result.contract)add(root,'p','Основание: '+result.contract.id+' · '+result.contract.document+' · '+result.contract.clause+' · проверил: '+result.contract.reviewer);
+      for(const row of result.attachment.unmapped)add(root,'p',unmappedText(row));
     }
     const localTime=value=>new Date(value).toLocaleString('ru-RU',{timeZone:'Asia/Kamchatka'});
-    if(result.contract)add(root,'p','Учебный договор действует до '+localTime(result.contract.end)+' (Камчатка), исключая этот момент.');
+    if(result.contract){
+      add(root,'p','Учебный заказчик по договору: '+result.contract.customer);
+      add(root,'p','Учебный договор действует с '+localTime(result.contract.start)+' до '+localTime(result.contract.end)+' (Камчатка), исключая момент окончания.');
+    }
     for(const {event,rule,clock} of result.episodes){
       if(event)add(root,'p',(event.kind==='ice_detected'?'Обнаружена скользкость':'Снегопад закончился')+' '+localTime(event.at)+' (учебное событие, Камчатка).');
       if(clock.dueAt)add(root,'p','Учебный срок: '+localTime(clock.dueAt)+' (Камчатка) · '+rule.minutes+' мин · '+rule.version+' · '+rule.clause);
@@ -266,6 +281,20 @@ function showRoad(id) {
   const close=add(root,'button','×','row-button');close.type='button';close.setAttribute('aria-label','Закрыть карточку');close.onclick=()=>{root.hidden=true;};
   add(root,'strong',title);
   add(root,'p','Дорожная сеть OSM · сценарные приоритеты','sub');
+  if(roadMap?.mode==='attachment'){
+    const annex=roadMap.attachment;
+    if(!annex){add(root,'p','Учебное приложение не загружено.');return;}
+    const rows=annex.mapped.get(key)??[];
+    add(root,'p',rows.length?'Участок входит в учебное приложение':annex.mapped.size?'Участок вне сопоставленных границ учебного договора':'Границы учебного договора требуют ручной проверки');
+    for(const row of rows){
+      add(root,'p',row.contractId+' · '+data.workTypes[row.operation]+' · '+row.from+' — '+row.until+' (дата окончания исключена)');
+      add(root,'p','Заказчик: '+row.customer+' · исполнитель: '+row.executor+' · ответственный: '+row.officer);
+      add(root,'p',row.source+' · '+row.clause);
+    }
+    const review=add(root,'button','Проверить учебный наряд по файлу','row-button');review.type='button';
+    review.onclick=()=>{$('order-case').value='attachment';openOrder(edges.get(key).id);};
+    return;
+  }
   if(roadMap?.mode==='coverage'){
     const rows=roadMap.coverage?.get(key)??[];
     if(!roadMap.coverage)add(root,'p','Срез сейчас недоступен.');
@@ -473,6 +502,7 @@ async function init() {
     initRegistry();
     roadMap = new RoadMap($('map'),data.network,pickColor,showRoad,data.tasks);
     initCoverage();
+    initAttachmentMap();
     syncDraft();
     $('status').textContent = '';
     if (data.latest) renderPlan(data.latest); else await calculate();
@@ -584,7 +614,7 @@ function initRegistry(){
     const mapped=record.rows.find(r=>r.mapped && edges.has(r.edge_id));
     if(record.mode==='simulation' && mapped && record.network_version===data.network.version){
       const use=add(detail,'button','Проверить учебный наряд по редакции','row-button');use.type='button';
-      use.onclick=()=>{selectedRegistryRef={contractId:record.contract_id,revision:record.revision,line:mapped.line};registryAttachment=schedule;$('attachment-file').value='';$('order-case').value='attachment';roadMap.focus(mapped.edge_id);openOrder(mapped.edge_id);$('order-operation').value=mapped.operation;refreshOrder();};
+      use.onclick=()=>{selectedRegistryRef={contractId:record.contract_id,revision:record.revision,line:mapped.line};registryAttachment=schedule;$('attachment-file').value='';$('order-case').value='attachment';roadMap.onModeChange(roadMap.mode);roadMap.focus(mapped.edge_id);openOrder(mapped.edge_id);$('order-operation').value=mapped.operation;refreshOrder();};
     }
   }
   function failure(error){status.textContent=error.message;}
@@ -606,7 +636,7 @@ function initRegistry(){
       if(json?.size>256*1024 || pdf?.size>12*1024*1024)throw Error('Допустимо до 256 КиБ JSON и 12 МиБ PDF.');
       const file=manual?{mode:$('reg-mode').value,networkVersion:data.network.version,
         rows:[{...(opened?.rows[0]?.worksite?{worksite:opened.rows[0].worksite}:{}),...Object.fromEntries(Object.keys(fields).map(k=>[k,$('reg-field-'+k).value.trim()]).filter(([,v])=>v))}]}:
-        example?sampleAttachment:JSON.parse(await json.text());
+        example?await readSampleAttachment():JSON.parse(await json.text());
       if(versions.value && (!opened || opened.contract_id!==file.rows?.[0]?.contractId))throw Error('Выберите редакцию этого договора или новую запись.');
       const pdfBase64=pdf?await new Promise((resolve,reject)=>{
         const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=()=>reject(Error('Не удалось прочитать PDF'));reader.readAsDataURL(pdf);
@@ -655,6 +685,46 @@ function initCoverage(){
   find.onchange=()=>{if(find.value)roadMap.focus(find.value);};
   for(const element of [day,operation,source,time])element.onchange=()=>refresh(roadMap.mode);
   roadMap.onModeChange=refresh;
+}
+
+function initAttachmentMap(){
+  const mode='attachment', controls=$('attachment-controls'), status=$('attachment-status'), list=$('attachment-unmapped');
+  const inside=$('attachment-show'), outside=$('attachment-outside'), reset=$('attachment-reset'), input=$('attachment-file');
+  const onModeChange=roadMap.onModeChange;
+  $('map-mode').add(new Option('Учебное договорное приложение',mode));
+  let sequence=0;
+  async function refresh(currentMode){
+    const revision=++sequence;
+    controls.hidden=currentMode!==mode;
+    if(controls.hidden)return;
+    roadMap.attachment=null;
+    reset.hidden=!input.files.length && !registryAttachment;
+    inside.hidden=outside.hidden=list.hidden=true;
+    list.replaceChildren();
+    status.textContent='Читаем учебное приложение…';
+    roadMap.paint(true);
+    if(roadMap.selected)roadMap.highlight(roadMap.selected);
+    try{
+      const {attachment,name}=await loadAttachment();
+      if(revision!==sequence)return;
+      const annex=readContractAnnex(attachment,data.network.version,edges,data.workTypes);
+      roadMap.attachment=annex;
+      status.textContent='Учебный файл '+name+' · участков на карте: '+annex.mapped.size+' · строк на ручную проверку: '+annex.unmapped.length+'.';
+      for(const row of annex.unmapped)add(list,'li',unmappedText(row));
+      list.hidden=!annex.unmapped.length;
+      const first=edges.get(annex.mapped.keys().next().value);
+      const other=first && data.network.edges.find(edge=>!annex.mapped.has(edge.id) && edge.routable!==false &&
+        (edge.from===first.to || edge.to===first.from || edge.from===first.from || edge.to===first.to));
+      inside.hidden=!first;outside.hidden=!other;
+      inside.onclick=()=>roadMap.focus(first.id);
+      outside.onclick=()=>roadMap.focus(other.id);
+      roadMap.paint(true);
+      if(roadMap.selected)roadMap.highlight(roadMap.selected);
+    }catch(error){if(revision===sequence)status.textContent='Файл не загружен. '+error.message;}
+  }
+  roadMap.onModeChange=currentMode=>{onModeChange?.(currentMode);refresh(currentMode);};
+  input.onchange=()=>{registryAttachment=selectedRegistryRef=null;refresh(roadMap.mode);refreshOrder();};
+  reset.onclick=()=>{input.value='';input.onchange();};
 }
 
 function initEquipmentObservations(){
