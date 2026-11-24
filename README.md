@@ -1,5 +1,7 @@
 # Север · Snow Control
 
+[![CI](https://github.com/rust08/Sever-GitHub/actions/workflows/check.yml/badge.svg)](https://github.com/rust08/Sever-GitHub/actions/workflows/check.yml)
+
 Диспетчерская зимней уборки Петропавловска-Камчатского. На карте видно, какая машина назначена на участок, когда она туда прибудет и какие работы останутся за пределами смены при заданном бюджете. Система предназначена для демонстрации и сравнения сценариев.
 
 ![Обзор смены — демонстрационные данные](research/dashboard-qa/light-overview.png)
